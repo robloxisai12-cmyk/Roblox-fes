@@ -25,6 +25,8 @@ jobs:
           /tmp/aftman/aftman self-install
           export PATH="$HOME/.aftman/bin:$PATH"
           echo "$HOME/.aftman/bin" >> "$GITHUB_PATH"
+          # Fresh CI runners must explicitly trust the pinned tool before install.
+          aftman add rojo-rbx/rojo@7.7.0
           aftman install
           rojo --version
           test "$(rojo --version | grep -o '7\.7\.0')" = "7.7.0"
