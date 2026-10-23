@@ -25,6 +25,7 @@ local defaultsModule = configFolder:WaitForChild("PlayerSessionDefaults") :: Mod
 local defaults = require(defaultsModule) :: SessionDefaults
 local organizationModule = configFolder:WaitForChild("OrganizationConfig") :: ModuleScript
 local organizationConfig = require(organizationModule)
+local RankRules = require(script.Parent.RankRules)
 
 local sessions: { [Player]: SessionData } = {}
 local connections: { RBXScriptConnection } = {}
@@ -120,7 +121,7 @@ function PlayerDataService.SetRole(player: Player, role: string): boolean
 end
 
 function PlayerDataService.SetRank(player: Player, rank: string): boolean
-	if type(rank) ~= "string" or rank == "" or #rank > 32 then
+	if type(rank) ~= "string" or rank == "" or #rank > 32 or not RankRules.IsRank(rank) then
 		return false
 	end
 

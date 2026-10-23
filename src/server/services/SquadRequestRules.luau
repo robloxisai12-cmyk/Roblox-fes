@@ -20,7 +20,10 @@ local fieldsByAction = {
 
 local SquadRequestRules = {}
 
-function SquadRequestRules.Validate(value: any, assignableRoles: { [string]: boolean }): (Request?, string?)
+function SquadRequestRules.Validate(
+	value: any,
+	assignableRoles: { read [string]: boolean }
+): (Request?, string?)
 	if type(value) ~= "table" or getmetatable(value) ~= nil then
 		return nil, "invalid_request"
 	end
@@ -76,7 +79,7 @@ end
 function SquadRequestRules.ValidateCall(
 	value: any,
 	argumentCount: number,
-	assignableRoles: { [string]: boolean }
+	assignableRoles: { read [string]: boolean }
 ): (Request?, string?)
 	if argumentCount ~= 1 then
 		return nil, "invalid_argument_count"

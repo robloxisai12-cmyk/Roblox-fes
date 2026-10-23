@@ -13,6 +13,15 @@
         "$className": "Folder",
         "SquadRequest": {
           "$className": "RemoteFunction"
+        },
+        "CombatRequest": {
+          "$className": "RemoteEvent"
+        },
+        "RadioRequest": {
+          "$className": "RemoteEvent"
+        },
+        "MissionRequest": {
+          "$className": "RemoteEvent"
         }
       }
     },

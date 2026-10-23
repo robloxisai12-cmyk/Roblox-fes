@@ -39,6 +39,10 @@ local playerRemovingConnection: RBXScriptConnection? = nil
 
 local SquadService = {}
 
+function SquadService.GetPlayerSquad(userId: number)
+	return registry:GetPlayerSquad(userId)
+end
+
 local function errorResponse(code: string)
 	return {
 		ok = false,
@@ -49,9 +53,28 @@ end
 local function serializeSquad(squad: any)
 	local members = {}
 	for _, userId in ipairs(squad.MemberUserIds) do
+		local player = Players:GetPlayerByUserId(userId)
+		local session = if player ~= nil then PlayerDataService.GetSession(player) else nil
+		local status = "Desconectado"
+		if player ~= nil then
+			local character = player.Character
+			local humanoid = if character ~= nil then character:FindFirstChildOfClass("Humanoid") else nil
+			if character ~= nil and character:GetAttribute("SierraIncapacitated") == true then
+				status = "Incapacitado"
+			elseif humanoid ~= nil and humanoid.Health > 0 and humanoid.Health < humanoid.MaxHealth then
+				status = "Herido"
+			elseif humanoid ~= nil and humanoid.Health > 0 then
+				status = "Operativo"
+			else
+				status = "Sin personaje"
+			end
+		end
 		table.insert(members, {
 			userId = userId,
 			role = squad.MemberRoles[userId],
+			displayName = if session ~= nil then session.DisplayName else `Jugador {userId}`,
+			rank = if session ~= nil then session.Rank else "Sin rango",
+			status = status,
 		})
 	end
 
@@ -60,6 +83,7 @@ local function serializeSquad(squad: any)
 		name = squad.Name,
 		companyId = squad.CompanyId,
 		leaderUserId = squad.LeaderUserId,
+		maxMembers = config.MaxMembersPerSquad,
 		members = members,
 	}
 end

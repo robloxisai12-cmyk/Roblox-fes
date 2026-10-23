@@ -237,13 +237,10 @@ local function buildVegetation(folder: Folder, layout: GeneratedLayout)
 	for treeIndex, tree in ipairs(layout.Trees) do
 		local scale = tree.Scale
 		local trunkHeight = 7 * scale
-		local treeFolder = Instance.new("Folder")
-		treeFolder.Name = string.format("Arbol_%03d", treeIndex)
-		treeFolder.Parent = vegetationFolder
 
 		local trunk = newPart(
-			treeFolder,
-			"Tronco",
+			vegetationFolder,
+			string.format("Tronco_%03d", treeIndex),
 			Vector3.new(trunkHeight, 1.4 * scale, 1.4 * scale),
 			CFrame.new(tree.X, tree.GroundY + trunkHeight / 2, tree.Z) * CFrame.Angles(0, 0, math.pi / 2),
 			Enum.Material.Wood,
@@ -253,8 +250,8 @@ local function buildVegetation(folder: Folder, layout: GeneratedLayout)
 		trunk.Shape = Enum.PartType.Cylinder
 
 		local canopy = newPart(
-			treeFolder,
-			"Copa",
+			vegetationFolder,
+			string.format("Copa_%03d", treeIndex),
 			Vector3.new(9 * scale, 8 * scale, 9 * scale),
 			CFrame.new(tree.X, tree.GroundY + trunkHeight + 1.5 * scale, tree.Z),
 			Enum.Material.LeafyGrass,
@@ -344,7 +341,9 @@ function MapGenerationService.Start(): (boolean, string)
 
 	local success, buildError = pcall(buildMap, mapFolder, layout)
 	if not success then
-		mapFolder:SetAttribute("GenerationStatus", "Failed")
+		mapFolder:Destroy()
+		isStarted = false
+		generatedLayout = nil
 		warn(`MapGenerationService: map construction failed: {buildError}`)
 		return false, "build_failed"
 	end
