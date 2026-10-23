@@ -63,11 +63,7 @@ local function getCharacterParts(player: Player): (Model?, Humanoid?, BasePart?)
 	end
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	if humanoid == nil
-		or humanoid.Health <= 0
-		or rootPart == nil
-		or not rootPart:IsA("BasePart")
-	then
+	if humanoid == nil or humanoid.Health <= 0 or rootPart == nil or not rootPart:IsA("BasePart") then
 		return nil, nil, nil
 	end
 	return character, humanoid, rootPart
@@ -77,22 +73,10 @@ local function sendStatus(player: Player)
 	if player.Parent ~= Players then
 		return
 	end
-	local character = player.Character
-	local record = if character ~= nil then records[character] else nil
-	local inventory = InventoryService.GetInventory(player)
-	if record == nil or inventory == nil then
-		return
+	local status = MedicalService.GetStatus(player)
+	if status ~= nil then
+		requestRemote:FireClient(player, status)
 	end
-	requestRemote:FireClient(player, {
-		action = "medical_status",
-		ok = true,
-		health = record.State.Health,
-		maxHealth = record.State.MaxHealth,
-		wounds = #record.State.Wounds,
-		bleedRate = record.State.BleedRate,
-		incapacitated = record.State.IsIncapacitated,
-		medicalItems = inventory.MedicalItems,
-	})
 end
 
 local function clearTreatment(treatment: Treatment, code: string, notify: boolean)
@@ -151,6 +135,10 @@ local function setIncapacitated(character: Model, record: CharacterRecord)
 	humanoid.JumpHeight = 0
 	humanoid.AutoRotate = false
 	character:SetAttribute("SierraIncapacitated", true)
+	local player = Players:GetPlayerFromCharacter(character)
+	if player ~= nil then
+		InventoryService.CancelReload(player)
+	end
 end
 
 local function restoreAfterRevive(character: Model, record: CharacterRecord)
@@ -169,19 +157,29 @@ local function isRecordCurrent(character: Model, record: CharacterRecord): boole
 	return records[character] == record and character.Parent ~= nil and record.Humanoid.Parent ~= nil
 end
 
+local function syncHealth(record: CharacterRecord)
+	local humanoid = record.Humanoid
+	record.State.MaxHealth = math.max(1, humanoid.MaxHealth)
+	-- A downed character stays down until MedicalRules.Revive succeeds.
+	if record.State.IsIncapacitated and humanoid.Health > 0 then
+		record.State.Health = math.min(record.State.Health, record.State.MaxHealth)
+	else
+		record.State.Health = math.clamp(humanoid.Health, 0, record.State.MaxHealth)
+	end
+end
+
 local function startBleedLoop(character: Model, record: CharacterRecord)
 	if record.LoopRunning then
 		return
 	end
 	record.LoopRunning = true
 	task.spawn(function()
-		while isRecordCurrent(character, record)
-			and (record.State.BleedRate > 0 or record.State.IsIncapacitated)
-		do
+		while isRecordCurrent(character, record) and (record.State.BleedRate > 0 or record.State.IsIncapacitated) do
 			task.wait(config.BleedTickSeconds)
 			if not isRecordCurrent(character, record) then
 				break
 			end
+			syncHealth(record)
 			local _, expired = MedicalRules.ApplyBleedTick(record.State, config.BleedTickSeconds, os.clock(), config)
 			record.Humanoid.Health = record.State.Health
 			if record.State.IsIncapacitated then
@@ -236,7 +234,8 @@ end
 local function bindCharacter(player: Player, character: Model)
 	task.spawn(function()
 		local humanoidInstance = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 10)
-		if humanoidInstance == nil
+		if
+			humanoidInstance == nil
 			or not humanoidInstance:IsA("Humanoid")
 			or player.Parent ~= Players
 			or player.Character ~= character
@@ -251,7 +250,8 @@ local function bindCharacter(player: Player, character: Model)
 end
 
 local function isTreatmentCurrent(treatment: Treatment): (boolean, string)
-	if treatment.Actor.Parent ~= Players
+	if
+		treatment.Actor.Parent ~= Players
 		or treatment.Target.Parent ~= Players
 		or treatment.Actor.Character ~= treatment.ActorCharacter
 		or treatment.Target.Character ~= treatment.TargetCharacter
@@ -289,6 +289,7 @@ local function finishTreatment(treatment: Treatment)
 		return
 	end
 
+	syncHealth(targetRecord)
 	if treatment.ItemId == "EmergencyKit" then
 		if not targetRecord.State.IsIncapacitated then
 			clearTreatment(treatment, "target_not_incapacitated", true)
@@ -342,7 +343,10 @@ local function finishTreatment(treatment: Treatment)
 	end
 end
 
-local function beginTreatment(actor: Player, request: { action: "treat", itemId: string, targetUserId: number }): (boolean, string)
+local function beginTreatment(
+	actor: Player,
+	request: { action: "treat", itemId: string, targetUserId: number }
+): (boolean, string)
 	if pendingByActor[actor] ~= nil then
 		return false, "treatment_in_progress"
 	end
@@ -382,6 +386,7 @@ local function beginTreatment(actor: Player, request: { action: "treat", itemId:
 	if targetRecord == nil then
 		return false, "medical_state_unavailable"
 	end
+	syncHealth(targetRecord)
 	local item = config.Items[request.itemId]
 	if item == nil then
 		return false, "invalid_medical_item"
@@ -432,7 +437,8 @@ local function beginTreatment(actor: Player, request: { action: "treat", itemId:
 			end
 			if request.itemId == "EmergencyKit" then
 				local currentRecord = records[targetCharacter]
-				if currentRecord == nil
+				if
+					currentRecord == nil
 					or not currentRecord.State.IsIncapacitated
 					or currentRecord.State.IncapacitatedUntil == nil
 					or os.clock() >= currentRecord.State.IncapacitatedUntil
@@ -454,6 +460,7 @@ function MedicalService.GetStatus(player: Player): { [string]: any }?
 	if record == nil or inventory == nil then
 		return nil
 	end
+	syncHealth(record)
 	local session = PlayerDataService.GetSession(player)
 	local weapons = {}
 	for weaponId, weaponState in pairs(inventory.Weapons) do
@@ -463,12 +470,14 @@ function MedicalService.GetStatus(player: Player): { [string]: any }?
 			magazine = weaponState.Magazine,
 			reserve = weaponState.Reserve,
 			isReloading = weaponState.IsReloading,
+			reloadEndsAt = if weaponState.IsReloading then InventoryService.GetReloadEndsAt(player) else nil,
 		}
 	end
 	local equippedWeaponDefinition = inventoryConfig.Weapons[inventory.EquippedWeaponId]
 	return {
 		action = "medical_status",
 		ok = true,
+		character = character,
 		health = record.State.Health,
 		maxHealth = record.State.MaxHealth,
 		wounds = #record.State.Wounds,
@@ -499,9 +508,7 @@ function MedicalService.ApplyDamage(humanoid: Humanoid, amount: number): (boolea
 	if record == nil then
 		return false, "medical_state_unavailable"
 	end
-	if not record.State.IsIncapacitated then
-		record.State.Health = math.clamp(humanoid.Health, 0, record.State.MaxHealth)
-	end
+	syncHealth(record)
 	local applied, code = MedicalRules.ApplyDamage(record.State, amount, os.clock(), config)
 	if not applied then
 		return false, code
@@ -543,7 +550,8 @@ function MedicalService.HandleRequest(player: Player, request: any): { [string]:
 		clearTreatment(treatment, "treatment_cancelled", false)
 		return { action = "medical_result", ok = true, code = "treatment_cancelled" }
 	elseif request.action == "treat" then
-		if type(request.itemId) ~= "string"
+		if
+			type(request.itemId) ~= "string"
 			or type(request.targetUserId) ~= "number"
 			or request.targetUserId % 1 ~= 0
 			or request.targetUserId <= 0
@@ -585,26 +593,29 @@ function MedicalService.Start()
 	for _, player in ipairs(Players:GetPlayers()) do
 		addPlayer(player)
 	end
-	table.insert(serviceConnections, Players.PlayerRemoving:Connect(function(player)
-		local character = player.Character
-		if character ~= nil then
-			clearCharacter(character)
-		end
-		local treatment = pendingByActor[player]
-		if treatment ~= nil then
-			clearTreatment(treatment, "player_left", false)
-		end
-		local targetTreatment = pendingByTarget[player]
-		if targetTreatment ~= nil then
-			clearTreatment(targetTreatment, "target_left", true)
-		end
-		for _, connection in ipairs(playerConnections[player] or {}) do
-			connection:Disconnect()
-		end
-		playerConnections[player] = nil
-		requestBuckets[player] = nil
-		lastTreatmentAt[player] = nil
-	end))
+	table.insert(
+		serviceConnections,
+		Players.PlayerRemoving:Connect(function(player)
+			local character = player.Character
+			if character ~= nil then
+				clearCharacter(character)
+			end
+			local treatment = pendingByActor[player]
+			if treatment ~= nil then
+				clearTreatment(treatment, "player_left", false)
+			end
+			local targetTreatment = pendingByTarget[player]
+			if targetTreatment ~= nil then
+				clearTreatment(targetTreatment, "target_left", true)
+			end
+			for _, connection in ipairs(playerConnections[player] or {}) do
+				connection:Disconnect()
+			end
+			playerConnections[player] = nil
+			requestBuckets[player] = nil
+			lastTreatmentAt[player] = nil
+		end)
+	)
 end
 
 function MedicalService.Stop()

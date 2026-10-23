@@ -35,13 +35,20 @@ local CombatService = {}
 
 local function sendResult(player: Player, response: { [string]: any })
 	if player.Parent == Players then
+		if response.action == "result" or response.action == "logistics_result" then
+			response.status = MedicalService.GetStatus(player)
+		end
 		requestRemote:FireClient(player, response)
 	end
 end
 
 local function getAliveCharacter(player: Player): (Model?, Humanoid?, BasePart?)
 	local character = player.Character
-	if character == nil or not character:IsDescendantOf(Workspace) then
+	if
+		character == nil
+		or not character:IsDescendantOf(Workspace)
+		or character:GetAttribute("SierraIncapacitated") == true
+	then
 		return nil, nil, nil
 	end
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -122,9 +129,10 @@ local function processShot(player: Player, directionData: { x: number, y: number
 				true,
 				rootPart ~= nil and rootPart:IsA("BasePart"),
 				targetHumanoid.Health
+			) and targetPlayer ~= player and CombatRules.IsWithinRange(
+				(raycastResult.Position - head.Position).Magnitude,
+				weapon.Range
 			)
-				and targetPlayer ~= player
-				and CombatRules.IsWithinRange((raycastResult.Position - head.Position).Magnitude, weapon.Range)
 			if isValidTarget then
 				local damage = CombatRules.CalculateDamage(targetHumanoid.Health, weapon.Damage)
 				local applied, damageCode = MedicalService.ApplyDamage(targetHumanoid, damage)
@@ -153,12 +161,8 @@ local function processRequest(player: Player, rawRequest: any, argumentCount: nu
 	end
 
 	local now = os.clock()
-	local allowed, bucket = CombatRules.TakeRateLimitToken(
-		requestBuckets[player],
-		now,
-		REQUEST_WINDOW_SECONDS,
-		MAX_REQUESTS_PER_WINDOW
-	)
+	local allowed, bucket =
+		CombatRules.TakeRateLimitToken(requestBuckets[player], now, REQUEST_WINDOW_SECONDS, MAX_REQUESTS_PER_WINDOW)
 	requestBuckets[player] = bucket
 	if not allowed then
 		return nil

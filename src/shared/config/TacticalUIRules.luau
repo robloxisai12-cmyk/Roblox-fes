@@ -29,7 +29,9 @@ function TacticalUIRules.GetCondition(
 	bleedRate: number,
 	incapacitated: boolean
 ): string
-	if incapacitated then
+	if health <= 0 and maxHealth > 0 then
+		return "MUERTO"
+	elseif incapacitated then
 		return "INCAPACITADO"
 	elseif bleedRate > 0 then
 		return string.format("SANGRANDO %.1f/s", bleedRate)
@@ -46,6 +48,26 @@ function TacticalUIRules.GetAmmoText(magazine: number, reserve: number, isReload
 		return "RECARGANDO"
 	end
 	return string.format("%d  |  %d", math.max(0, math.floor(magazine)), math.max(0, math.floor(reserve)))
+end
+
+local combatMessages = {
+	no_ammo = "Sin municion. Recarga el arma.",
+	no_reserve_ammo = "No queda municion de reserva.",
+	magazine_full = "El cargador esta lleno.",
+	reloading = "Espera a que termine la recarga.",
+	already_reloading = "La recarga ya esta en curso.",
+	attacker_unavailable = "No puedes combatir con el personaje en este estado.",
+	rate_limited = "Espera un momento antes de volver a intentarlo.",
+	reload_started = "Recargando...",
+	reload_complete = "Recarga completa.",
+	equipped = "Arma equipada.",
+}
+
+function TacticalUIRules.GetCombatMessage(code: any, ok: boolean): string
+	if type(code) == "string" and combatMessages[code] ~= nil then
+		return combatMessages[code]
+	end
+	return if ok then "" else "No se pudo completar la accion."
 end
 
 return table.freeze(TacticalUIRules)
