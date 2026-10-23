@@ -2,9 +2,12 @@
 
 Workflow: `.github/workflows/rojo-ci.yml`.
 
-- On pull requests and pushes to `main`: installs pinned Rojo 7.7.0 (via `aftman.toml`) and Luau 0.743, runs the project check and phase 3–11 suites, compiles Luau sources, analyzes pure modules, builds `build/sierradeguardia.rbxlx`, and uploads the file as an Actions artifact.
+- On pull requests and pushes to `main`: installs pinned Rojo 7.7.0 and Luau 0.743, runs project checks and phase 3–11 tests, compiles Luau sources, analyzes pure modules, builds `build/sierradeguardia.rbxlx`, and uploads it as an Actions artifact.
 - No Roblox upload occurs on pull requests or pushes.
-- On a **manual** `workflow_dispatch` run on `main` only: the same tests/build must succeed first. The second job saves the compiled place using the Roblox Open Cloud API with `versionType=Saved` (NOT `Published`). It targets the existing place; it does not create a new experience.
+- On a manual `workflow_dispatch` run on `main` only, tests/build must pass before the upload job runs.
+- The manual workflow now asks for **Version target**:
+  - **Saved** (default): saves a draft version; it does not make the version live.
+  - **Published**: publishes the built place version, which can change what players see when they join. Choose this only after reviewing the build and confirming you want to update the live game.
 - The upload job uses the GitHub environment `roblox-saved`. You may configure required reviewers for that environment in repository Settings for an extra approval step.
 
 Set the following in repository Settings > Secrets and variables > Actions:
@@ -17,6 +20,6 @@ Set the following in repository Settings > Secrets and variables > Actions:
 
 In Roblox Creator Dashboard, restrict the key to the correct experience and grant the Place Publishing API's required `universe-places` write permission. Keep the key secret; do not paste it into issues, PRs, workflow files or chats.
 
-After merging this PR into `main`, open the repository's Actions tab, select **Sierra de Guardia - Rojo CI**, choose **Run workflow**, select `main` and run it. This will **save a draft version to Roblox** after the tests pass; it does not make that version live. For build-only checks, simply open a PR or push to main instead. Inspect the Actions logs and download the `sierradeguardia-place` artifact. Never run the manual workflow until you intend to overwrite the saved draft version of the selected place.
+After reviewing and merging the PR into `main`, open the repository's Actions tab, select **Sierra de Guardia - Rojo CI**, choose **Run workflow**, select `main`, then select the desired **Version target**. Use **Saved** for a draft or **Published** to update the live version. The workflow does not run the upload job on pull requests or ordinary pushes.
 
-These checks do not execute Roblox Studio or verify runtime gameplay. Test the place in Studio or an appropriate private test environment before any live publication.
+These checks do not execute Roblox Studio or verify runtime gameplay. A green CI run proves the project builds and static tests pass, not that the map renders correctly in a live Roblox server. Verify the result in a private test environment before publishing to all players.
