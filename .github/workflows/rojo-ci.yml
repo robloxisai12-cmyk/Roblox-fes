@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install pinned Rojo 7.7.0
         shell: bash
         run: |
@@ -58,7 +58,7 @@ jobs:
           rojo build default.project.json --output build/sierradeguardia.rbxlx
           test -s build/sierradeguardia.rbxlx
       - name: Upload compiled place artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sierradeguardia-place
           path: build/sierradeguardia.rbxlx
@@ -73,7 +73,7 @@ jobs:
     environment: roblox-saved
     steps:
       - name: Download tested place
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: sierradeguardia-place
           path: build
