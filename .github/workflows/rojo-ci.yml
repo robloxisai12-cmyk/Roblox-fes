@@ -5,6 +5,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version_type:
+        description: "Roblox version target (Published makes the selected place live)"
+        required: true
+        type: choice
+        options:
+          - Saved
+          - Published
+        default: Saved
 
 permissions:
   contents: read
@@ -57,7 +66,7 @@ jobs:
           retention-days: 14
 
   save-to-roblox:
-    name: Save draft place (never publish)
+    name: Upload place to Roblox
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: build-and-test
     runs-on: ubuntu-24.04
@@ -68,11 +77,12 @@ jobs:
         with:
           name: sierradeguardia-place
           path: build
-      - name: Check credentials and save draft through Open Cloud
+      - name: Check credentials and upload through Open Cloud
         env:
           ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
           ROBLOX_UNIVERSE_ID: ${{ vars.ROBLOX_UNIVERSE_ID }}
           ROBLOX_PLACE_ID: ${{ vars.ROBLOX_PLACE_ID }}
+          ROBLOX_VERSION_TYPE: ${{ inputs.version_type || 'Saved' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -80,10 +90,11 @@ jobs:
           : "${ROBLOX_UNIVERSE_ID:?Missing ROBLOX_UNIVERSE_ID variable}"
           : "${ROBLOX_PLACE_ID:?Missing ROBLOX_PLACE_ID variable}"
           [[ "$ROBLOX_UNIVERSE_ID" =~ ^[0-9]+$ ]] && [[ "$ROBLOX_PLACE_ID" =~ ^[0-9]+$ ]]
+          [[ "$ROBLOX_VERSION_TYPE" == "Saved" || "$ROBLOX_VERSION_TYPE" == "Published" ]]
           test -s build/sierradeguardia.rbxlx
           curl --fail-with-body --silent --show-error --retry 2 \
             --request POST \
             --header "x-api-key: ${ROBLOX_API_KEY}" \
             --header "Content-Type: application/octet-stream" \
             --data-binary @build/sierradeguardia.rbxlx \
-            "https://apis.roblox.com/universes/v1/${ROBLOX_UNIVERSE_ID}/places/${ROBLOX_PLACE_ID}/versions?versionType=Saved"
+            "https://apis.roblox.com/universes/v1/${ROBLOX_UNIVERSE_ID}/places/${ROBLOX_PLACE_ID}/versions?versionType=${ROBLOX_VERSION_TYPE}"
