@@ -25,7 +25,7 @@ jobs:
           install -m 0755 /tmp/rojo/rojo "$HOME/.local/bin/rojo"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           rojo --version
-          test "$(rojo --version | grep -o '7\\.7\\.0')" = "7.7.0"
+          rojo --version | grep -Fq "7.7.0"
       - name: Install pinned Luau test runner
         shell: bash
         run: |
