@@ -305,3 +305,23 @@ Limitaciones y riesgos pendientes: no se ejecutó Roblox Studio ni pruebas de ca
 7. Con MicroProfiler/estadísticas de Studio, medir arranque del mapa, instancias, memoria, FPS y tráfico con más jugadores y en hardware móvil; observar correcciones de movimiento bajo latencia y buscar conexiones/eventos duplicados tras varias rondas.
 
 No se afirma que fases 1–11 estén completamente funcionales en Roblox hasta completar estas pruebas manuales. No se hizo commit, push ni publicación.
+
+## Correcciones de combate móvil y HUD
+
+Los botones de combate táctiles son controles dedicados: arrastrar la pantalla para mover la cámara o usar el joystick no solicita un disparo. El clic de PC respeta los eventos consumidos por la interfaz y los campos de texto. Fusil, pistola, disparo y recarga se mantienen sobre el área reservada al salto; deben comprobarse en dispositivos con zonas seguras y varias orientaciones. Se conserva un disparo por pulsación.
+
+La retícula marca el centro de la cámara. El cliente calcula la dirección desde la cabeza hacia el punto de mira, sin enviar objetivos ni daño; el servidor mantiene el origen del raycast, obstáculos, alcance, cadencia y consumo de munición. Los personajes incapacitados no pueden disparar, equipar ni recargar, y una incapacitación cancela la recarga pendiente.
+
+Los mensajes médicos y las respuestas de combate/logística comparten un snapshot completo con identidad del personaje, salud, rol, armas y munición. El HUD descarta snapshots de personajes anteriores y usa la salud/MaxHealth del Humanoid actual; el servidor sincroniza cambios nativos de salud antes de consultar o modificar el estado médico. Las recargas incluyen una fecha de finalización con reloj del servidor para presentar el tiempo restante. Los rechazos muestran una explicación y el arma seleccionada se resalta.
+
+Validar además en Roblox Studio con dos clientes: mirar/moverse/saltar/disparar simultáneamente; controles en móvil vertical y horizontal; seleccionar arma y recargar; disparar sin munición; daño y sangrado durante la recarga; regeneración y cambios de MaxHealth; incapacitación, reanimación y muerte/reaparición durante la recarga; apuntado en primera/tercera persona y obstáculos entre cabeza y objetivo. Las pruebas CLI usan reglas y dobles de APIs, no sustituyen la validación del motor.
+
+
+Pruebas de regresión de servicios con Luau 0.743 (instalación descrita arriba):
+
+```sh
+LUAU_BIN=/tmp/luau/luau node scripts/check-mobile.mjs
+/tmp/luau/luau tests/phase10.test.luau
+```
+
+El harness carga el código completo de InventoryService, MedicalService y CombatService con dobles de las APIs Roblox para comprobar snapshots, salud nativa, raycasts de servidor, incapacitación y temporizadores de recarga a través de muerte/reaparición. No ejecuta el motor ni presenta interfaces.

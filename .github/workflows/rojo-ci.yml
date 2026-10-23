@@ -47,6 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/check-phase2.mjs
+          LUAU_BIN=/tmp/luau/luau node scripts/check-mobile.mjs
           for phase in 3 4 5 6 7 8 9 10 11; do
             /tmp/luau/luau "tests/phase${phase}.test.luau"
           done

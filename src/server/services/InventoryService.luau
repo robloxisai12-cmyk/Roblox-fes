@@ -29,6 +29,7 @@ local inventories: { [Player]: InventoryState } = {}
 local medicalReservations: { [Player]: { [number]: MedicalReservation } } = {}
 local nextMedicalReservationId = 0
 local reloadVersions: { [Player]: number } = {}
+local reloadEndsAt: { [Player]: number } = {}
 local playerConnections: { [Player]: { RBXScriptConnection } } = {}
 local characterDeathConnections: { [Player]: RBXScriptConnection } = {}
 local connections: { RBXScriptConnection } = {}
@@ -43,6 +44,7 @@ local function nextReloadVersion(player: Player): number
 end
 
 function InventoryService.CancelReload(player: Player)
+	reloadEndsAt[player] = nil
 	local state = inventories[player]
 	if state ~= nil then
 		InventoryRules.CancelReload(state)
@@ -202,7 +204,8 @@ end
 
 function InventoryService.AddMedicalItem(player: Player, itemId: string, amount: number): boolean
 	local state = inventories[player]
-	if state == nil
+	if
+		state == nil
 		or type(itemId) ~= "string"
 		or type(medicalConfig.Items[itemId]) ~= "table"
 		or type(amount) ~= "number"
@@ -266,12 +269,7 @@ function InventoryService.ApplyLogisticsSupply(player: Player, resourceId: strin
 			return 0, "invalid_weapon"
 		end
 		local maximum = weaponDefinition.InitialReserve * supply.MaxAmmoReserveMultiplier
-		local rounds, code = InventoryRules.AddAmmoReserve(
-			state,
-			weaponId,
-			amount * supply.AmmoRoundsPerUnit,
-			maximum
-		)
+		local rounds, code = InventoryRules.AddAmmoReserve(state, weaponId, amount * supply.AmmoRoundsPerUnit, maximum)
 		if rounds <= 0 then
 			return 0, code
 		end
@@ -291,12 +289,8 @@ function InventoryService.ApplyLogisticsSupply(player: Player, resourceId: strin
 		end
 		return math.min(amount, added), "supplied"
 	elseif resourceId == "Rations" then
-		local units, code = InventoryRules.AddSupply(
-			state,
-			"Rations",
-			amount * supply.RationsPerUnit,
-			supply.MaxRations
-		)
+		local units, code =
+			InventoryRules.AddSupply(state, "Rations", amount * supply.RationsPerUnit, supply.MaxRations)
 		if units <= 0 then
 			return 0, code
 		end
@@ -330,7 +324,12 @@ function InventoryService.BeginReload(player: Player): (boolean, string, number?
 	if not ok then
 		return false, code, nil, nil
 	end
+	reloadEndsAt[player] = workspace:GetServerTimeNow() + (duration :: number)
 	return true, code, duration, nextReloadVersion(player)
+end
+
+function InventoryService.GetReloadEndsAt(player: Player): number?
+	return reloadEndsAt[player]
 end
 
 function InventoryService.CompleteReload(player: Player, version: number): (boolean, number)
@@ -338,6 +337,18 @@ function InventoryService.CompleteReload(player: Player, version: number): (bool
 	if state == nil or reloadVersions[player] ~= version then
 		return false, 0
 	end
+	local character = player.Character
+	local humanoid = if character ~= nil then character:FindFirstChildOfClass("Humanoid") else nil
+	if
+		humanoid == nil
+		or humanoid.Health <= 0
+		or character == nil
+		or character:GetAttribute("SierraIncapacitated") == true
+	then
+		InventoryService.CancelReload(player)
+		return false, 0
+	end
+	reloadEndsAt[player] = nil
 	return InventoryRules.CompleteReload(state, config)
 end
 

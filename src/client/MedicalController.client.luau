@@ -70,6 +70,8 @@ cancelButton.Size = UDim2.new(0, 250, 0, 44)
 cancelButton.BackgroundColor3 = Color3.fromRGB(95, 65, 48)
 
 local latestStatus: { [string]: any }? = nil
+local currentHumanoid: Humanoid? = nil
+local healthConnections: { RBXScriptConnection } = {}
 
 local function requestItem(itemId: string, targetUserId: number)
 	combatRemote:FireServer({
@@ -90,8 +92,11 @@ local function nearestDownedAlly(): Player?
 	for _, candidate in ipairs(Players:GetPlayers()) do
 		if candidate ~= player then
 			local targetCharacter = candidate.Character
-			local targetRoot = if targetCharacter ~= nil then targetCharacter:FindFirstChild("HumanoidRootPart") else nil
-			if targetCharacter ~= nil
+			local targetRoot = if targetCharacter ~= nil
+				then targetCharacter:FindFirstChild("HumanoidRootPart")
+				else nil
+			if
+				targetCharacter ~= nil
 				and targetCharacter:GetAttribute("SierraIncapacitated") == true
 				and targetRoot ~= nil
 				and targetRoot:IsA("BasePart")
@@ -113,14 +118,19 @@ local function renderStatus()
 		return
 	end
 	local items = status.medicalItems or {}
-	local condition = if status.incapacitated then "INCAPACITADO"
+	local condition = if status.incapacitated
+		then "INCAPACITADO"
 		elseif (status.bleedRate or 0) > 0 then `Sangrando ({status.bleedRate}/s)`
 		elseif (status.wounds or 0) > 0 then `Heridas: {status.wounds}`
 		else "Estable"
+	local health = if currentHumanoid ~= nil then currentHumanoid.Health else status.health or 0
+	if status.incapacitated then
+		health = math.min(health, status.health or health)
+	end
 	statusLabel.Text = string.format(
 		"Salud: %d / %d\n%s\nVendajes: %d  Botiquines: %d  Emergencia: %d",
-		math.floor(status.health or 0),
-		math.floor(status.maxHealth or 0),
+		math.floor(health),
+		math.floor(if currentHumanoid ~= nil then currentHumanoid.MaxHealth else status.maxHealth or 0),
 		condition,
 		items.Bandage or 0,
 		items.Medkit or 0,
@@ -172,31 +182,36 @@ combatRemote.OnClientEvent:Connect(function(message: any)
 	if type(message) ~= "table" then
 		return
 	end
-	if message.action == "medical_status" then
-		latestStatus = message
+	local snapshot = if message.action == "medical_status" then message else message.status
+	if type(snapshot) == "table" and snapshot.character == player.Character then
+		latestStatus = snapshot
 		renderStatus()
 	elseif message.action == "medical_result" then
 		statusLabel.Text = if message.ok then `Accion medica: {message.code}` else `No se pudo tratar: {message.code}`
 	end
 end)
 
-player.CharacterAdded:Connect(function(character)
-	local humanoid = character:WaitForChild("Humanoid", 10)
-	if humanoid ~= nil and humanoid:IsA("Humanoid") then
-		humanoid.HealthChanged:Connect(function(health)
-			if latestStatus ~= nil then
-				latestStatus.health = health
-				renderStatus()
-			end
-		end)
+local function bindCharacter(character: Model)
+	for _, connection in ipairs(healthConnections) do
+		connection:Disconnect()
 	end
-	task.defer(function()
-		combatRemote:FireServer({ action = "medical_status" })
-	end)
-end)
+	table.clear(healthConnections)
+	latestStatus = nil
+	currentHumanoid = nil
+	statusLabel.Text = "Estado medico: sincronizando..."
+	local humanoid = character:WaitForChild("Humanoid", 10)
+	if player.Character ~= character then
+		return
+	end
+	if humanoid ~= nil and humanoid:IsA("Humanoid") then
+		currentHumanoid = humanoid
+		table.insert(healthConnections, humanoid.HealthChanged:Connect(renderStatus))
+		table.insert(healthConnections, humanoid:GetPropertyChangedSignal("MaxHealth"):Connect(renderStatus))
+	end
+	combatRemote:FireServer({ action = "medical_status" })
+end
 
+player.CharacterAdded:Connect(bindCharacter)
 if player.Character ~= nil then
-	task.defer(function()
-		combatRemote:FireServer({ action = "medical_status" })
-	end)
+	task.spawn(bindCharacter, player.Character)
 end

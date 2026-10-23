@@ -347,6 +347,7 @@ local function setPage(page: string)
 				local gui = viewGuis[item.Id]
 				if gui ~= nil then
 					gui.Enabled = true
+					playerGui:SetAttribute("SierraMenuOpen", true)
 				end
 				if item.Id == "radio" and refreshRadio ~= nil then
 					refreshRadio()
@@ -361,6 +362,7 @@ local function setPage(page: string)
 end
 
 local function openMenu()
+	playerGui:SetAttribute("SierraMenuOpen", true)
 	for _, gui in pairs(viewGuis) do
 		gui.Enabled = false
 	end
@@ -377,11 +379,14 @@ local function openMenu()
 end
 
 closeMenu = function()
+	playerGui:SetAttribute("SierraMenuOpen", false)
 	hub.Visible = false
 	menuButton.Text = if TacticalUIRules.GetProfile(
-		(Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize.X) or 1280,
-		(Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize.Y) or 720
-	).IsCompact then "MENU" else "TAB  MENU"
+			(Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize.X) or 1280,
+			(Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize.Y) or 720
+		).IsCompact
+		then "MENU"
+		else "TAB  MENU"
 end
 
 menuButton.Activated:Connect(function()
@@ -429,7 +434,11 @@ end
 local function showSquadState(response: any)
 	clearRoster()
 	if type(response) ~= "table" or response.ok ~= true then
-		setStatusMessage(`No se pudo leer el escuadron: {if type(response) == "table" then response.code or "error" else "sin respuesta"}`)
+		setStatusMessage(
+			`No se pudo leer el escuadron: {if type(response) == "table"
+				then response.code or "error"
+				else "sin respuesta"}`
+		)
 		return
 	end
 	setStatusMessage("Los rangos y el estado los proporciona el servidor.")
@@ -559,17 +568,26 @@ sidearmButton.Activated:Connect(function()
 end)
 
 local latestMedicalStatus: any = nil
+local currentHumanoid: Humanoid? = nil
+local healthConnections: { RBXScriptConnection } = {}
 local function requestMedicalStatus()
 	combatRemote:FireServer({ action = "medical_status" })
 end
 
 local function renderMedicalStatus(status: any)
-	if type(status) ~= "table" then
+	if type(status) ~= "table" or status.character ~= player.Character then
 		return
 	end
 	latestMedicalStatus = status
 	local health = if type(status.health) == "number" then status.health else 0
 	local maxHealth = if type(status.maxHealth) == "number" then status.maxHealth else 0
+	if currentHumanoid ~= nil then
+		health = currentHumanoid.Health
+		maxHealth = currentHumanoid.MaxHealth
+		if status.incapacitated == true then
+			health = math.min(health, status.health)
+		end
+	end
 	local wounds = if type(status.wounds) == "number" then status.wounds else 0
 	local bleedRate = if type(status.bleedRate) == "number" then status.bleedRate else 0
 	local incapacitated = status.incapacitated == true
@@ -591,27 +609,33 @@ local function renderMedicalStatus(status: any)
 		ammoText.Text = "MUNICION  sincronizando"
 	end
 
+	local canEquip = health > 0 and not incapacitated and (type(weapon) ~= "table" or not weapon.isReloading)
+	rifleButton.Interactable = canEquip
+	sidearmButton.Interactable = canEquip
+	rifleButton.BackgroundColor3 = if weaponId == "Rifle" then COLORS.SurfaceActive else COLORS.Surface
+	sidearmButton.BackgroundColor3 = if weaponId == "Sidearm" then COLORS.SurfaceActive else COLORS.Surface
 	local items = if type(status.medicalItems) == "table" then status.medicalItems else {}
 	local summaryLines = {
 		`Condicion: {condition}`,
 		`Rol: {status.role or "Rifleman"}`,
 		`Heridas: {wounds}  |  Sangrado: {string.format("%.1f", bleedRate)}/s`,
 		`Arma: {status.weaponName or weaponId}`,
-		`Cargador: {if type(weapon) == "table" then weapon.magazine or 0 else "--"}  |  Reserva: {if type(weapon) == "table" then weapon.reserve or 0 else "--"}`,
+		`Cargador: {if type(weapon) == "table" then weapon.magazine or 0 else "--"}  |  Reserva: {if type(weapon)
+				== "table"
+			then weapon.reserve or 0
+			else "--"}`,
 		`Vendajes: {items.Bandage or 0}  |  Botiquines: {items.Medkit or 0}  |  Emergencia: {items.EmergencyKit or 0}`,
 	}
 	medicalSummary.Text = table.concat(summaryLines, "\n")
 end
 
 combatRemote.OnClientEvent:Connect(function(message: any)
-	if type(message) == "table" and message.action == "medical_status" then
-		renderMedicalStatus(message)
-	elseif type(message) == "table" and message.action == "result" and message.ok == true then
-		if message.requestAction == "equip" or message.requestAction == "shoot" or message.requestAction == "reload" then
-			task.delay(0.15, function()
-				requestMedicalStatus()
-			end)
-		end
+	if type(message) ~= "table" then
+		return
+	end
+	local snapshot = if message.action == "medical_status" then message else message.status
+	if type(snapshot) == "table" then
+		renderMedicalStatus(snapshot)
 	end
 end)
 
@@ -673,32 +697,38 @@ end
 
 ContextActionService:BindAction("SierraTacticalMenu", toggleMenuAction, false, Enum.KeyCode.Tab, Enum.KeyCode.Escape)
 
-player.CharacterAdded:Connect(function(character)
+local function bindCharacter(character: Model)
+	for _, connection in ipairs(healthConnections) do
+		connection:Disconnect()
+	end
+	table.clear(healthConnections)
+	currentHumanoid = nil
+	latestMedicalStatus = nil
+	healthText.Text = "SALUD  -- / --"
+	conditionText.Text = "Estado: sincronizando"
+	ammoText.Text = "MUNICION  sincronizando"
+	rifleButton.Interactable = false
+	sidearmButton.Interactable = false
 	local humanoid = character:WaitForChild("Humanoid", 10)
+	if player.Character ~= character then
+		return
+	end
 	if humanoid ~= nil and humanoid:IsA("Humanoid") then
-		humanoid.HealthChanged:Connect(function(health)
+		currentHumanoid = humanoid
+		local function refreshHealth()
 			if latestMedicalStatus ~= nil then
-				latestMedicalStatus.health = health
 				renderMedicalStatus(latestMedicalStatus)
 			end
-		end)
-	end
-	task.delay(0.5, requestMedicalStatus)
-end)
-
-if player.Character ~= nil then
-	task.defer(function()
-		local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-		if humanoid ~= nil then
-			humanoid.HealthChanged:Connect(function(health)
-				if latestMedicalStatus ~= nil then
-					latestMedicalStatus.health = health
-					renderMedicalStatus(latestMedicalStatus)
-				end
-			end)
 		end
-		requestMedicalStatus()
-	end)
+		table.insert(healthConnections, humanoid.HealthChanged:Connect(refreshHealth))
+		table.insert(healthConnections, humanoid:GetPropertyChangedSignal("MaxHealth"):Connect(refreshHealth))
+	end
+	requestMedicalStatus()
+end
+
+player.CharacterAdded:Connect(bindCharacter)
+if player.Character ~= nil then
+	task.spawn(bindCharacter, player.Character)
 end
 
 task.spawn(function()
