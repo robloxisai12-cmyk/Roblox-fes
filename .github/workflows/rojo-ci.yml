@@ -15,21 +15,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Install Aftman and pinned Rojo
+      - name: Install pinned Rojo 7.7.0
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/aftman
-          curl -fsSL https://github.com/LPGhatguy/aftman/releases/download/v0.3.0/aftman-0.3.0-linux-x86_64.zip -o /tmp/aftman/aftman.zip
-          unzip -oq /tmp/aftman/aftman.zip -d /tmp/aftman
-          /tmp/aftman/aftman self-install
-          export PATH="$HOME/.aftman/bin:$PATH"
-          echo "$HOME/.aftman/bin" >> "$GITHUB_PATH"
-          # Fresh CI runners must explicitly trust the pinned tool before install.
-          aftman add rojo-rbx/rojo@7.7.0
-          aftman install
+          mkdir -p "$HOME/.local/bin" /tmp/rojo
+          curl -fsSL https://github.com/rojo-rbx/rojo/releases/download/v7.7.0/rojo-7.7.0-linux-x86_64.zip -o /tmp/rojo/rojo.zip
+          unzip -oq /tmp/rojo/rojo.zip -d /tmp/rojo
+          install -m 0755 /tmp/rojo/rojo "$HOME/.local/bin/rojo"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           rojo --version
-          test "$(rojo --version | grep -o '7\.7\.0')" = "7.7.0"
+          test "$(rojo --version | grep -o '7\\.7\\.0')" = "7.7.0"
       - name: Install pinned Luau test runner
         shell: bash
         run: |
