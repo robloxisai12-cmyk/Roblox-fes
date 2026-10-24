@@ -9,6 +9,7 @@ local InventoryService = require(script.Parent.InventoryService)
 local PlayerDataService = require(script.Parent.PlayerDataService)
 local LogisticsRules = require(script.Parent.LogisticsRules)
 local VehicleRules = require(script.Parent.VehicleRules)
+local VehicleInputRules = require(script.Parent.VehicleInputRules)
 
 local configFolder = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("config")
 local configModule = configFolder:WaitForChild("LogisticsConfig") :: ModuleScript
@@ -38,6 +39,7 @@ type VehicleRecord = {
 	Cargo: { [string]: number },
 	Speed: number,
 	NextStatusAt: number,
+	Input: VehicleInputRules.Input?,
 }
 
 type RequestBucket = {
@@ -49,6 +51,7 @@ local supplyPoints: { [string]: SupplyPoint } = {}
 local vehicles: { [string]: VehicleRecord } = {}
 local deliveryTotals: { [string]: { [string]: number } } = {}
 local requestBuckets: { [Player]: RequestBucket } = {}
+local driveBuckets: { [Player]: RequestBucket } = {}
 local connections: { RBXScriptConnection } = {}
 local isStarted = false
 local worldFolder: Folder? = nil
@@ -64,7 +67,8 @@ local function getCharacter(player: Player): (Model?, Humanoid?, BasePart?)
 	end
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local root = character:FindFirstChild("HumanoidRootPart")
-	if humanoid == nil
+	if
+		humanoid == nil
 		or humanoid.Health <= 0
 		or root == nil
 		or not root:IsA("BasePart")
@@ -76,11 +80,7 @@ local function getCharacter(player: Player): (Model?, Humanoid?, BasePart?)
 end
 
 local function getGroundPosition(x: number, z: number): Vector3
-	local result = Workspace:Raycast(
-		Vector3.new(x, 350, z),
-		Vector3.new(0, -650, 0),
-		RaycastParams.new()
-	)
+	local result = Workspace:Raycast(Vector3.new(x, 350, z), Vector3.new(0, -650, 0), RaycastParams.new())
 	return Vector3.new(x, if result ~= nil then result.Position.Y else 24, z)
 end
 
@@ -152,6 +152,7 @@ local function createVehicle(vehicleId: string, definition: any, spawn: any, par
 	model.Name = vehicleId
 	model:SetAttribute("VehicleId", vehicleId)
 	model:SetAttribute("VehicleType", vehicleId:gsub("%d+$", ""))
+	model:SetAttribute("VehicleCategory", definition.Category)
 	model.Parent = parent
 
 	local ground = getGroundPosition(spawn.X, spawn.Z)
@@ -214,22 +215,31 @@ local function createVehicle(vehicleId: string, definition: any, spawn: any, par
 		Cargo = LogisticsRules.CreateCargo(config),
 		Speed = 0,
 		NextStatusAt = 0,
+		Input = nil,
 	}
 	model:PivotTo(pivot)
-	table.insert(connections, seat:GetPropertyChangedSignal("Occupant"):Connect(function()
-		local occupant = seat.Occupant
-		if occupant == nil then
-			return
-		end
-		local occupantCharacter = occupant.Parent
-		local player = if occupantCharacter ~= nil then Players:GetPlayerFromCharacter(occupantCharacter) else nil
-		if player == nil or not LogisticsService.IsAuthorizedDriver(player, record) then
-			occupant.Sit = false
-			if player ~= nil then
-				requestRemote:FireClient(player, { action = "logistics_result", ok = false, code = "driver_unauthorized" })
+	table.insert(
+		connections,
+		seat:GetPropertyChangedSignal("Occupant"):Connect(function()
+			record.Input = nil
+			record.Speed = 0
+			local occupant = seat.Occupant
+			if occupant == nil then
+				return
 			end
-		end
-	end))
+			local occupantCharacter = occupant.Parent
+			local player = if occupantCharacter ~= nil then Players:GetPlayerFromCharacter(occupantCharacter) else nil
+			if player == nil or not LogisticsService.IsAuthorizedDriver(player, record) then
+				occupant.Sit = false
+				if player ~= nil then
+					requestRemote:FireClient(
+						player,
+						{ action = "logistics_result", ok = false, code = "driver_unauthorized" }
+					)
+				end
+			end
+		end)
+	)
 	return record
 end
 
@@ -280,7 +290,11 @@ local function isVehicleNearPlayer(player: Player, vehicle: VehicleRecord): bool
 	if vehicle.Seat.Occupant == humanoid then
 		return true
 	end
-	return VehicleRules.IsSafeInteraction((root.Position - vehicle.Chassis.Position).Magnitude, config.InteractionRange, true)
+	return VehicleRules.IsSafeInteraction(
+		(root.Position - vehicle.Chassis.Position).Magnitude,
+		config.InteractionRange,
+		true
+	)
 end
 
 function LogisticsService.IsAuthorizedDriver(player: Player, vehicle: VehicleRecord): boolean
@@ -308,6 +322,8 @@ local function getVehicleSnapshot(vehicle: VehicleRecord, player: Player?)
 	return {
 		id = vehicle.Id,
 		name = vehicle.Definition.DisplayName,
+		category = vehicle.Definition.Category,
+		canDrive = player ~= nil and LogisticsService.IsAuthorizedDriver(player, vehicle),
 		fuel = vehicle.Fuel,
 		fuelCapacity = vehicle.Definition.FuelCapacity,
 		speed = vehicle.Speed,
@@ -335,8 +351,12 @@ local function makeStatus(player: Player)
 	local vehicleSnapshots = {}
 	local nearestVehicleDistance = math.huge
 	local nearestVehicle: VehicleRecord? = nil
+	local drivenVehicle: VehicleRecord? = nil
 	for _, vehicle in pairs(vehicles) do
 		local distance = (root.Position - vehicle.Chassis.Position).Magnitude
+		if vehicle.Seat.Occupant == humanoid then
+			drivenVehicle = vehicle
+		end
 		if distance < nearestVehicleDistance then
 			nearestVehicleDistance = distance
 			nearestVehicle = vehicle
@@ -352,21 +372,26 @@ local function makeStatus(player: Player)
 		end
 	end
 	local inventory = InventoryService.GetInventory(player)
-	local nearestVehicleIsOccupiedByPlayer = nearestVehicle ~= nil and nearestVehicle.Seat.Occupant == humanoid
+
 	return {
 		action = "logistics_status",
 		ok = true,
 		vehicles = vehicleSnapshots,
 		points = nearbyPoints,
-		inventory = if inventory ~= nil then {
-			weapons = inventory.Weapons,
-			medicalItems = inventory.MedicalItems,
-			supplies = inventory.Supplies,
-		} else {},
+		inventory = if inventory ~= nil
+			then {
+				weapons = inventory.Weapons,
+				medicalItems = inventory.MedicalItems,
+				equipment = inventory.Equipment,
+				supplies = inventory.Supplies,
+			}
+			else {},
 		nearestVehicleId = if nearestVehicle ~= nil and nearestVehicleDistance <= config.VehicleEnterRange
 			then nearestVehicle.Id
 			else nil,
-		isDriving = nearestVehicleIsOccupiedByPlayer,
+		isDriving = drivenVehicle ~= nil,
+		drivenVehicleId = if drivenVehicle ~= nil then drivenVehicle.Id else nil,
+		character = player.Character,
 	}
 end
 
@@ -379,6 +404,7 @@ local function sendVehicleStatus(vehicle: VehicleRecord)
 	if player ~= nil then
 		requestRemote:FireClient(player, {
 			action = "logistics_vehicle_status",
+			character = player.Character,
 			ok = true,
 			vehicle = getVehicleSnapshot(vehicle, player),
 		})
@@ -403,17 +429,25 @@ local function processVehicleMovement(vehicle: VehicleRecord, deltaTime: number)
 	local player = findHumanoidPlayer(vehicle)
 	local occupant = vehicle.Seat.Occupant
 	if player == nil or occupant == nil then
+		vehicle.Input = nil
 		vehicle.Speed = 0
 		return
 	end
 	local character = player.Character
-	if character == nil or character:GetAttribute("SierraIncapacitated") == true then
+	if
+		character == nil
+		or occupant.Parent ~= character
+		or occupant.Health <= 0
+		or character:GetAttribute("SierraIncapacitated") == true
+	then
+		vehicle.Input = nil
 		occupant.Sit = false
 		vehicle.Speed = 0
 		return
 	end
 	local canDrive = LogisticsRules.CanDrive(vehicle.Fuel, true, LogisticsService.IsAuthorizedDriver(player, vehicle))
 	if not canDrive then
+		vehicle.Input = nil
 		vehicle.Speed = 0
 		if not LogisticsService.IsAuthorizedDriver(player, vehicle) then
 			occupant.Sit = false
@@ -421,7 +455,7 @@ local function processVehicleMovement(vehicle: VehicleRecord, deltaTime: number)
 		sendVehicleStatusIfDue(vehicle)
 		return
 	end
-	local throttle = vehicle.Seat.ThrottleFloat
+	local throttle, steering = VehicleInputRules.Read(vehicle.Input, occupant, os.clock(), config.DriveInputTimeout)
 	local speed, remainingFuel = LogisticsRules.StepVehicle(
 		vehicle.Fuel,
 		throttle,
@@ -432,14 +466,18 @@ local function processVehicleMovement(vehicle: VehicleRecord, deltaTime: number)
 	)
 	local currentPivot = vehicle.Model:GetPivot()
 	local turnDirection = if speed < 0 then -1 else 1
-	local steering = vehicle.Seat.SteerFloat
-	local turnedPivot = currentPivot * CFrame.Angles(0, -steering * vehicle.Definition.TurnRate * deltaTime * turnDirection, 0)
+	local turnedPivot = currentPivot
+		* CFrame.Angles(0, -steering * vehicle.Definition.TurnRate * deltaTime * turnDirection, 0)
 	local displacement = turnedPivot.LookVector * speed * deltaTime
 	if displacement.Magnitude > 0 then
 		local rayParams = RaycastParams.new()
 		rayParams.FilterType = Enum.RaycastFilterType.Exclude
 		rayParams.FilterDescendantsInstances = { vehicle.Model, character }
-		local obstruction = Workspace:Raycast(vehicle.Chassis.Position + Vector3.new(0, 1, 0), displacement.Unit * (displacement.Magnitude + 3), rayParams)
+		local obstruction = Workspace:Raycast(
+			vehicle.Chassis.Position + Vector3.new(0, 1, 0),
+			displacement.Unit * (displacement.Magnitude + 3),
+			rayParams
+		)
 		if obstruction == nil then
 			vehicle.Model:PivotTo(turnedPivot + displacement)
 			vehicle.Fuel = remainingFuel
@@ -458,12 +496,8 @@ local function step(deltaTime: number)
 		processVehicleMovement(vehicle, math.min(deltaTime, 0.1))
 	end
 	for _, point in pairs(supplyPoints) do
-		local restocked, nextRestockAt = LogisticsRules.Restock(
-			point,
-			now,
-			point.NextRestockAt,
-			point.Definition.RestockSeconds
-		)
+		local restocked, nextRestockAt =
+			LogisticsRules.Restock(point, now, point.NextRestockAt, point.Definition.RestockSeconds)
 		if restocked > 0 then
 			point.NextRestockAt = nextRestockAt
 		end
@@ -475,15 +509,23 @@ local function enterVehicle(player: Player, vehicle: VehicleRecord): (boolean, s
 	if character == nil or humanoid == nil or root == nil then
 		return false, "player_unavailable"
 	end
-	if not VehicleRules.IsSafeInteraction((root.Position - vehicle.Chassis.Position).Magnitude, config.VehicleEnterRange, true) then
+	if
+		not VehicleRules.IsSafeInteraction(
+			(root.Position - vehicle.Chassis.Position).Magnitude,
+			config.VehicleEnterRange,
+			true
+		)
+	then
 		return false, "out_of_range"
 	end
-	local allowed, code = VehicleRules.CanEnter(true, vehicle.Seat.Occupant ~= nil, LogisticsService.IsAuthorizedDriver(player, vehicle))
+	local allowed, code =
+		VehicleRules.CanEnter(true, vehicle.Seat.Occupant ~= nil, LogisticsService.IsAuthorizedDriver(player, vehicle))
 	if not allowed then
 		return false, code
 	end
 	vehicle.Seat:Sit(humanoid)
-	return vehicle.Seat.Occupant == humanoid, if vehicle.Seat.Occupant == humanoid then "entered_vehicle" else "seat_unavailable"
+	return vehicle.Seat.Occupant == humanoid,
+		if vehicle.Seat.Occupant == humanoid then "entered_vehicle" else "seat_unavailable"
 end
 
 local function exitVehicle(player: Player, vehicle: VehicleRecord): (boolean, string)
@@ -495,6 +537,8 @@ local function exitVehicle(player: Player, vehicle: VehicleRecord): (boolean, st
 	if not allowed then
 		return false, code
 	end
+	vehicle.Input = nil
+	vehicle.Speed = 0
 	humanoid.Sit = false
 	return true, "exited_vehicle"
 end
@@ -503,15 +547,22 @@ local function handleLoadCargo(player: Player, request: any, vehicle: VehicleRec
 	if not isVehicleNearPlayer(player, vehicle) then
 		return false, "vehicle_out_of_range"
 	end
-	if vehicle.Seat.Occupant ~= nil and vehicle.Seat.Occupant ~= (player.Character and player.Character:FindFirstChildOfClass("Humanoid")) then
+	if
+		vehicle.Seat.Occupant ~= nil
+		and vehicle.Seat.Occupant ~= (player.Character and player.Character:FindFirstChildOfClass("Humanoid"))
+	then
 		return false, "vehicle_occupied"
 	end
 	local pointId, point = getNearestPoint(vehicle.Chassis.Position, "Depot")
-	if pointId == nil or point == nil or not VehicleRules.IsSafeInteraction(
-		(vehicle.Chassis.Position - getPointPosition(point)).Magnitude,
-		point.Definition.Radius,
-		true
-	) then
+	if
+		pointId == nil
+		or point == nil
+		or not VehicleRules.IsSafeInteraction(
+			(vehicle.Chassis.Position - getPointPosition(point)).Magnitude,
+			point.Definition.Radius,
+			true
+		)
+	then
 		return false, "depot_out_of_range"
 	end
 	local loaded, code = LogisticsRules.LoadCargo(
@@ -530,11 +581,14 @@ local function handleDelivery(player: Player, vehicle: VehicleRecord): (boolean,
 		return false, "vehicle_out_of_range"
 	end
 	local _, point = getNearestPoint(vehicle.Chassis.Position, "Delivery")
-	if point == nil or not VehicleRules.IsSafeInteraction(
-		(vehicle.Chassis.Position - getPointPosition(point)).Magnitude,
-		point.Definition.Radius,
-		true
-	) then
+	if
+		point == nil
+		or not VehicleRules.IsSafeInteraction(
+			(vehicle.Chassis.Position - getPointPosition(point)).Magnitude,
+			point.Definition.Radius,
+			true
+		)
+	then
 		return false, "delivery_out_of_range"
 	end
 	local previousStock = table.clone(point.Stock)
@@ -561,11 +615,14 @@ local function handleResupply(player: Player, request: any, point: SupplyPoint):
 		return false, "not_a_depot"
 	end
 	local _, _, root = getCharacter(player)
-	if root == nil or not VehicleRules.IsSafeInteraction(
-		(root.Position - getPointPosition(point)).Magnitude,
-		point.Definition.Radius,
-		true
-	) then
+	if
+		root == nil
+		or not VehicleRules.IsSafeInteraction(
+			(root.Position - getPointPosition(point)).Magnitude,
+			point.Definition.Radius,
+			true
+		)
+	then
 		return false, "depot_out_of_range"
 	end
 	if not InventoryService.CanApplyLogisticsSupply(player, request.resourceId, request.amount) then
@@ -594,19 +651,17 @@ local function handleRefuel(player: Player, request: any, vehicle: VehicleRecord
 	if not isVehicleNearPlayer(player, vehicle) then
 		return false, "vehicle_out_of_range"
 	end
-	if not VehicleRules.IsSafeInteraction(
-		(vehicle.Chassis.Position - getPointPosition(point)).Magnitude,
-		point.Definition.Radius,
-		true
-	) then
+	if
+		not VehicleRules.IsSafeInteraction(
+			(vehicle.Chassis.Position - getPointPosition(point)).Magnitude,
+			point.Definition.Radius,
+			true
+		)
+	then
 		return false, "depot_out_of_range"
 	end
-	local fuel, used, code = LogisticsRules.Refuel(
-		vehicle.Fuel,
-		vehicle.Definition.FuelCapacity,
-		point.Stock,
-		config.Resupply.FuelPerUnit
-	)
+	local fuel, used, code =
+		LogisticsRules.Refuel(vehicle.Fuel, vehicle.Definition.FuelCapacity, point.Stock, config.Resupply.FuelPerUnit)
 	if used <= 0 then
 		return false, code
 	end
@@ -615,9 +670,40 @@ local function handleRefuel(player: Player, request: any, vehicle: VehicleRecord
 	return true, "refueled"
 end
 
+local function drive(player: Player, request: any): { [string]: any }
+	local allowed, bucket =
+		LogisticsRules.TakeRateLimitToken(driveBuckets[player], os.clock(), 1, config.MaxDriveRequestsPerWindow)
+	driveBuckets[player] = bucket
+	local vehicle = getVehicle(request)
+	local character, humanoid = getCharacter(player)
+	local canControl = vehicle ~= nil
+		and VehicleInputRules.CanControl(
+			humanoid ~= nil,
+			character == nil or character:GetAttribute("SierraIncapacitated") == true,
+			humanoid ~= nil and vehicle.Seat.Occupant == humanoid,
+			LogisticsService.IsAuthorizedDriver(player, vehicle)
+		)
+	if not allowed or not canControl then
+		return {
+			action = "logistics_drive_ack",
+			ok = false,
+			code = if not allowed then "rate_limited" else "driver_unavailable",
+		}
+	end
+	-- CombatRequestRules already rejects non-finite and out-of-range axes.
+	if vehicle ~= nil then
+		vehicle.Input =
+			{ Driver = humanoid, Throttle = request.throttle, Steer = request.steer, ReceivedAt = os.clock() }
+	end
+	return { action = "logistics_drive_ack", ok = true }
+end
+
 function LogisticsService.HandleRequest(player: Player, request: any): { [string]: any }
 	if player.Parent ~= Players then
 		return { action = "logistics_result", ok = false, code = "invalid_player" }
+	end
+	if type(request) == "table" and request.operation == "drive" then
+		return drive(player, request)
 	end
 	if not takeRequestToken(player) then
 		return { action = "logistics_result", ok = false, code = "rate_limited" }
@@ -634,7 +720,13 @@ function LogisticsService.HandleRequest(player: Player, request: any): { [string
 			return { action = "logistics_result", ok = false, code = "invalid_vehicle" }
 		end
 		local ok, code = exitVehicle(player, vehicle)
-		return { action = "logistics_result", ok = ok, code = code, vehicle = getVehicleSnapshot(vehicle, player) }
+		return {
+			action = "logistics_result",
+			ok = ok,
+			code = code,
+			vehicle = getVehicleSnapshot(vehicle, player),
+			character = player.Character,
+		}
 	end
 	if request.operation == "enter_vehicle" then
 		local vehicle = getVehicle(request)
@@ -642,7 +734,13 @@ function LogisticsService.HandleRequest(player: Player, request: any): { [string
 			return { action = "logistics_result", ok = false, code = "invalid_vehicle" }
 		end
 		local ok, code = enterVehicle(player, vehicle)
-		return { action = "logistics_result", ok = ok, code = code, vehicle = getVehicleSnapshot(vehicle, player) }
+		return {
+			action = "logistics_result",
+			ok = ok,
+			code = code,
+			vehicle = getVehicleSnapshot(vehicle, player),
+			character = player.Character,
+		}
 	end
 	if request.operation == "load_cargo" then
 		local vehicle = getVehicle(request)
@@ -650,7 +748,13 @@ function LogisticsService.HandleRequest(player: Player, request: any): { [string
 			return { action = "logistics_result", ok = false, code = "invalid_vehicle" }
 		end
 		local ok, code = handleLoadCargo(player, request, vehicle)
-		return { action = "logistics_result", ok = ok, code = code, vehicle = getVehicleSnapshot(vehicle, player) }
+		return {
+			action = "logistics_result",
+			ok = ok,
+			code = code,
+			vehicle = getVehicleSnapshot(vehicle, player),
+			character = player.Character,
+		}
 	end
 	if request.operation == "deliver_cargo" then
 		local vehicle = getVehicle(request)
@@ -658,7 +762,13 @@ function LogisticsService.HandleRequest(player: Player, request: any): { [string
 			return { action = "logistics_result", ok = false, code = "invalid_vehicle" }
 		end
 		local ok, code = handleDelivery(player, vehicle)
-		return { action = "logistics_result", ok = ok, code = code, vehicle = getVehicleSnapshot(vehicle, player) }
+		return {
+			action = "logistics_result",
+			ok = ok,
+			code = code,
+			vehicle = getVehicleSnapshot(vehicle, player),
+			character = player.Character,
+		}
 	end
 	if request.operation == "resupply" then
 		local point = getPoint(request)
@@ -679,6 +789,7 @@ function LogisticsService.HandleRequest(player: Player, request: any): { [string
 			action = "logistics_result",
 			ok = ok,
 			code = code,
+			character = player.Character,
 			vehicle = getVehicleSnapshot(vehicle, player),
 			point = getPointSnapshot(request.pointId, point),
 		}
@@ -695,7 +806,8 @@ end
 
 function LogisticsService.ConsumeDeliveredStock(pointId: string, resourceId: string, amount: number): boolean
 	local point = supplyPoints[pointId]
-	if point == nil
+	if
+		point == nil
 		or point.Definition.Kind ~= "Delivery"
 		or type(resourceId) ~= "string"
 		or type(amount) ~= "number"
@@ -750,9 +862,13 @@ function LogisticsService.Start()
 		end
 	end
 	table.insert(connections, RunService.Heartbeat:Connect(step))
-	table.insert(connections, Players.PlayerRemoving:Connect(function(player)
-		requestBuckets[player] = nil
-	end))
+	table.insert(
+		connections,
+		Players.PlayerRemoving:Connect(function(player)
+			requestBuckets[player] = nil
+			driveBuckets[player] = nil
+		end)
+	)
 end
 
 function LogisticsService.Stop()
@@ -765,6 +881,7 @@ function LogisticsService.Stop()
 	end
 	table.clear(connections)
 	table.clear(requestBuckets)
+	table.clear(driveBuckets)
 	table.clear(deliveryTotals)
 	table.clear(vehicles)
 	table.clear(supplyPoints)

@@ -64,6 +64,7 @@ local function canAct(): boolean
 	local humanoid = if character ~= nil then character:FindFirstChildOfClass("Humanoid") else nil
 	return humanoid ~= nil
 		and humanoid.Health > 0
+		and humanoid.SeatPart == nil
 		and character ~= nil
 		and character:GetAttribute("SierraIncapacitated") ~= true
 		and playerGui:GetAttribute("SierraMenuOpen") ~= true

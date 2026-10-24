@@ -17,33 +17,42 @@ const modules = {
 	MedicalService: "src/server/services/MedicalService.luau",
 	CombatService: "src/server/services/CombatService.luau",
 };
+const hudModules = {
+	Cleanup: "src/client/hud/Cleanup.luau",
+	GameAdapter: "src/client/hud/GameAdapter.luau",
+	HUDView: "src/client/hud/HUDView.luau",
+	HUDController: "src/client/hud/HUDController.luau",
+	VehicleControls: "src/client/hud/VehicleControls.luau",
+	HUDRules: "src/shared/HUDRules.luau",
+	VehicleInputRules: "src/server/services/VehicleInputRules.luau",
+	LogisticsService: "src/server/services/LogisticsService.luau",
+	LogisticsRules: "src/server/services/LogisticsRules.luau",
+	VehicleRules: "src/server/services/VehicleRules.luau",
+	CombatRequestRules: modules.CombatRequestRules,
+	LogisticsConfig: modules.LogisticsConfig,
+	MapConfig: "src/shared/config/MapConfig.luau",
+};
 const longString = (text) => {
 	let equals = "";
 	while (text.includes(`]${equals}]`)) equals += "=";
 	return `[${equals}[${text}]${equals}]`;
 };
-const entries = await Promise.all(
-	Object.entries(modules).map(
-		async ([name, path]) =>
-			`[${JSON.stringify(name)}] = ${longString(await readFile(resolve(root, path), "utf8"))}`,
-	),
-);
-const harness = await readFile(
-	resolve(root, "tests/mobile-runtime.luau"),
-	"utf8",
-);
-const scratch = await mkdtemp(resolve(tmpdir(), "roblox-mobile-test-"));
-try {
-	const file = resolve(scratch, "mobile-runtime.luau");
-	await writeFile(
-		file,
-		`local sources = {\n${entries.join(",\n")}\n}\n${harness}`,
+async function runHarness(modulePaths, harnessPath) {
+	const entries = await Promise.all(
+		Object.entries(modulePaths).map(async ([name, path]) =>
+			`[${JSON.stringify(name)}] = ${longString(await readFile(resolve(root, path), "utf8"))}`),
 	);
-	const result = spawnSync(process.env.LUAU_BIN || "luau", [file], {
-		stdio: "inherit",
-	});
-	if (result.error) throw result.error;
-	process.exitCode = result.status ?? 1;
-} finally {
-	await rm(scratch, { recursive: true, force: true });
+	const harness = await readFile(resolve(root, harnessPath), "utf8");
+	const scratch = await mkdtemp(resolve(tmpdir(), "roblox-mobile-test-"));
+	try {
+		const file = resolve(scratch, "runtime.luau");
+		await writeFile(file, `local sources = {\n${entries.join(",\n")}\n}\n${harness}`);
+		const result = spawnSync(process.env.LUAU_BIN || "luau", [file], { stdio: "inherit" });
+		if (result.error) throw result.error;
+		if (result.status !== 0) throw new Error(`${harnessPath} exited ${result.status}`);
+	} finally {
+		await rm(scratch, { recursive: true, force: true });
+	}
 }
+await runHarness(modules, "tests/mobile-runtime.luau");
+await runHarness(hudModules, "tests/hud-runtime.luau");
