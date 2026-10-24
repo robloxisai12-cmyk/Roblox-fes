@@ -68,8 +68,11 @@ jobs:
 
   save-to-roblox:
     name: Upload place to Roblox
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: build-and-test
+    if: >-
+      needs.build-and-test.result == 'success' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     environment: roblox-saved
     steps:
@@ -83,7 +86,8 @@ jobs:
           ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
           ROBLOX_UNIVERSE_ID: ${{ vars.ROBLOX_UNIVERSE_ID }}
           ROBLOX_PLACE_ID: ${{ vars.ROBLOX_PLACE_ID }}
-          ROBLOX_VERSION_TYPE: ${{ inputs.version_type || 'Saved' }}
+          # Push events have no inputs; only an explicit manual choice may publish.
+          ROBLOX_VERSION_TYPE: ${{ github.event_name == 'workflow_dispatch' && inputs.version_type == 'Published' && 'Published' || 'Saved' }}
         shell: bash
         run: |
           set -euo pipefail
