@@ -59,7 +59,7 @@ function HUDView.new(parent: Instance, mapConfig: any, logisticsConfig: any)
 	self.Compass.Position, self.Compass.Size = UDim2.new(0.5, 0, 0, 8), UDim2.fromOffset(200, 60)
 	self.Heading = label(self.Compass, "Heading", "N 000°", 0, 26)
 	self.Heading.TextXAlignment = Enum.TextXAlignment.Center
-	self.Location = label(self.Compass, "Location", "Roblox-Fes", 27, 28)
+	self.Location = label(self.Compass, "Location", "SierraDeGuardia", 27, 28)
 	self.Location.TextXAlignment, self.Location.TextSize = Enum.TextXAlignment.Center, 12
 	self.Map = frame(self.Root, "Minimap")
 	self.Map.ClipsDescendants = true
@@ -234,7 +234,7 @@ function HUDView:Render(state: any)
 		self.Heading.Text = string.format("%s   %03d°", Rules.Cardinal(heading), math.floor(heading + 0.5) % 360)
 		local town = self.MapConfig.Town
 		local inTown = (position.X - town.Center.X) ^ 2 + (position.Z - town.Center.Z) ^ 2 <= town.Radius ^ 2
-		self.Location.Text = if inTown then town.Name else "Valle · Roblox-Fes"
+		self.Location.Text = if inTown then town.Name else "Valle · SierraDeGuardia"
 		self.Arrow.Rotation = heading
 		local size, range = self.Profile.MapSize, 220
 		for _, line in ipairs(self.Lines) do

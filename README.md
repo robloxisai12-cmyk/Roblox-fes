@@ -1,4 +1,4 @@
-# Roblox-Fes
+# SierraDeGuardia
 
 Simulador táctico cooperativo original ambientado en una región ficticia de la sierra mexicana. Escuadrones coordinan patrullas, logística y objetivos en un mundo amplio generado por código, con ritmo deliberado y decisiones de combate server-authoritative. La ambientación es propia: no replica mapas, nombres, armas, marcas ni assets de otros juegos.
 
@@ -327,7 +327,7 @@ LUAU_BIN=/tmp/luau/luau node scripts/check-mobile.mjs
 El harness carga el código completo de InventoryService, MedicalService y CombatService con dobles de las APIs Roblox para comprobar snapshots, salud nativa, raycasts de servidor, incapacitación y temporizadores de recarga a través de muerte/reaparición. No ejecuta el motor ni presenta interfaces.
 
 
-## HUD de conducción de Roblox-Fes
+## HUD de conducción de SierraDeGuardia
 
 La integración conserva el proyecto Rojo y los servicios existentes. `TacticalHUD` incorpora los módulos de `src/client/hud` para salud/munición, brújula, minimapa con caminos reales, accesos a los paneles y un modo específico para los Ranger. La velocidad se presenta en studs/s; combustible, carga, permisos e inventario proceden del servidor.
 

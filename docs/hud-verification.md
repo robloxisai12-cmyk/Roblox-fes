@@ -1,4 +1,4 @@
-# Roblox-Fes: integración del HUD de conducción
+# SierraDeGuardia: integración del HUD de conducción
 
 Estado: implementación revisable; validación en Roblox Studio y dispositivos pendiente.
 Base: `c1143b4767bd7a3583c015f447314be9df9a7df1` (`main`).
@@ -12,7 +12,7 @@ La primera imagen guía la distribución: superficies oscuras translúcidas, cha
 
 | Condición aprobada | Implementación y evidencia |
 |---|---|
-| Conservar Roblox-Fes | Arquitectura y servicios originales; ningún archivo eliminado. Nombre visible/documentado Roblox-Fes; identificadores internos históricos conservados. |
+| Conservar SierraDeGuardia | Arquitectura y servicios originales; ningún archivo eliminado. Nombre visible/documentado SierraDeGuardia; identificadores internos históricos conservados. |
 | Priorizar camioneta | Modo asociado al `DriverSeat` real de un modelo `VehicleCategory=Pickup`; pedales, dirección, freno, salida y cámara. |
 | Reutilizar sistemas reales | Telemetría de LogisticsService; salud/armas de MedicalService e InventoryService; paneles existentes de medicina, radio, misiones y escuadrón. |
 | Evitar datos inventados | Se muestra `--` o sincronización antes del snapshot. Inventario lógico del servidor; ningún saldo o necesidad ficticia. |
@@ -124,7 +124,7 @@ node scripts/check-mobile.mjs
 for phase in 3 4 5 6 7 8 9 10 11; do luau "tests/phase${phase}.test.luau"; done
 find src tests -name '*.luau' -type f -print0 | xargs -0 -n1 luau-compile >/dev/null
 luau-analyze src/shared/HUDRules.luau src/server/services/VehicleInputRules.luau
-rojo build default.project.json --output build/roblox-fes-hud.rbxlx
+rojo build default.project.json --output build/sierra-de-guardia-hud.rbxlx
 git diff --check
 ```
 
