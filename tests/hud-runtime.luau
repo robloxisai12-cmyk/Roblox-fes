@@ -287,7 +287,7 @@ services.ReplicatedStorage, services.Workspace, services.Players, services.RunSe
 local gui = instance("PlayerGui")
 local nativeTouch = attach(gui, instance("ScreenGui", "TouchGui"))
 local player =
-	{ Parent = Players, CharacterAdded = signal(), CharacterRemoving = signal(), CameraMode = enum.CameraMode.Classic }
+	{ Parent = Players, UserId = 4242, CharacterAdded = signal(), CharacterRemoving = signal(), CameraMode = enum.CameraMode.Classic }
 function Players:GetPlayerFromCharacter(character)
 	return if player.Character == character then player else nil
 end
@@ -302,6 +302,7 @@ for name, module in pairs(folder) do
 	end
 end
 shared.children.HUDRules = folder.HUDRules
+shared.children.HUDLayout = folder.HUDLayout
 local loaded = {
 	PlayerDataService = {
 		GetSession = function()
@@ -371,6 +372,7 @@ local function loadModule(module)
 	return loaded[name]
 end
 local Rules = loadModule(folder.HUDRules)
+local HUDLayout = loadModule(folder.HUDLayout)
 for _, case in ipairs({ { 0, -1, 0, "N" }, { 1, 0, 90, "E" }, { 0, 1, 180, "S" }, { -1, 0, 270, "O" } }) do
 	local heading = Rules.Heading(case[1], case[2])
 	check(math.abs(heading - case[3]) < 0.001 and Rules.Cardinal(heading) == case[4], "compass cardinal " .. case[4])
@@ -378,8 +380,8 @@ end
 local x, y = Rules.Project(20, -20, 0, 0, 100, 100)
 check(x == 60 and y == 40, "northeast marker projects right and up")
 for _, size in ipairs({ { 360, 640 }, { 667, 320 }, { 812, 375 }, { 1024, 768 }, { 1920, 1080 } }) do
-	local p = Rules.Profile(size[1], size[2])
-	check(p.ButtonSize >= 44 and p.MapSize <= size[2], "effective touch size at " .. size[1])
+	local p = HUDLayout.Compute(size[1], size[2], { Mode = "walking" })
+	check(p.ButtonSize >= 44 and p.Map.W <= size[2], "effective touch size at " .. size[1])
 end
 local payloadRules = loadModule(folder.CombatRequestRules)
 local function drivePayload(throttle, steer)
@@ -642,16 +644,61 @@ controller.Adapter:Receive({
 	equippedWeaponId = "Rifle",
 	weaponName = "Fusil",
 	weapons = { Rifle = { name = "Fusil", magazine = 12, reserve = 23 } },
+	medicalItems = { Bandage = 2, Medkit = 0 },
+	role = "Engineer",
+	wounds = 0,
 	bleedRate = 0,
 })
 controller.View:Render(controller.Adapter:GetState())
 check(string.find(controller.View.Ammo.Text, "12 / 23", 1, true) ~= nil, "HUD renders actual ammo snapshot")
+local view = controller.View
+check(screen:FindFirstChild("OpenWorldHUD") == view.Root and screen:FindFirstChild("DrivingHUD") == nil, "one HUD root, old one gone")
+check(view.Health.Text == "100 / 100" and view.Condition.Text == "ESTABLE", "health and condition come from Humanoid and snapshot")
+check(view.Role.Text == "Ingeniero", "role comes from the server snapshot")
+check(view.Location.Text == "Sierra de Guardia" and view.Heading.Text == "N 000°", "zone and heading come from real config and position: " .. tostring(view.Location.Text) .. " / " .. tostring(view.Heading.Text))
+check(view.SlotEntries.Bandage.Count.Text == "2" and view.Items.Bandage.Interactable, "bandage slot shows the real count")
+check(view.SlotEntries.Medkit.Count.Text == "0" and not view.Items.Medkit.Interactable, "empty medkit slot is disabled")
+check(view.Weapons.Rifle.Interactable and not view.Weapons.Sidearm.Interactable, "only owned weapons can be selected")
+check(view.Money == nil and view.Hunger == nil and view.Thirst == nil and view.Clock == nil, "no invented money/needs/clock indicators")
+view.Items.Bandage.Activated:Fire()
+check(
+	sent[#sent].action == "treat" and sent[#sent].itemId == "Bandage" and sent[#sent].targetUserId == 4242,
+	"bandage slot sends the existing validated treat intent"
+)
+view.Weapons.Rifle.Activated:Fire()
+check(sent[#sent].action == "equip" and sent[#sent].weaponId == "Rifle", "weapon slot sends the existing equip intent")
+for _, id in ipairs({ "squad", "inventory", "logistics", "mission", "radio" }) do
+	opened = nil
+	view.NavButtons[id].Activated:Fire()
+	check(opened == id, "menu entry opens " .. id)
+end
+opened = nil
+view.Slots.Inventory.Activated:Fire()
+check(opened == "inventory", "inventory quick slot opens the inventory")
+screen.AbsoluteSize = { X = 667, Y = 262 }
+controller:Layout()
+view:Render(controller.Adapter:GetState())
+local shortcutVisible = 0
+for _, id in ipairs({ "squad", "inventory", "logistics", "mission" }) do
+	if view.NavEntries[id].Button.Visible then
+		shortcutVisible += 1
+	end
+end
+check(shortcutVisible >= 1 and view.Hotbar.Visible and not view.SlotEntries.Inventory.Button.Visible, "short phones use shortcuts and four slots")
+screen.AbsoluteSize = { X = 1280, Y = 720 }
+controller:Layout()
+view:Render(controller.Adapter:GetState())
+view:SetMenuOpen(true)
+check(view.CloseIcon.Visible and not view.MenuIcon.Visible, "menu button shows close while a panel is open")
+view:SetMenuOpen(false)
 sit(seat, humanoid)
 heartbeat:Fire(0.21)
 local controls = controller.Controls
 check(nativeTouch.Enabled == false, "driving hides native joystick overlay")
 check(controls.DrivingId == "Ranger1" and cas.bindings.RobloxFesDriveForward ~= nil, "driving binds keyboard actions")
 check(controller.View.Drive.Visible and not controller.View.Hotbar.Visible, "driving replaces on-foot hotbar")
+check(controller.View.Vehicle.Visible and not controller.View.Weapon.Visible, "driving swaps weapon panel for vehicle telemetry")
+check(controller.View.Fuel.Text == "-- / --", "fuel is not invented before the server snapshot")
 local forward = { UserInputType = enum.UserInputType.Touch }
 local right = { UserInputType = enum.UserInputType.Touch }
 controller.View.DriveButtons.Forward.InputBegan:Fire(forward)

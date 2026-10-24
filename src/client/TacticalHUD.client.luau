@@ -10,7 +10,7 @@ local hudFolder = script.Parent:WaitForChild("hud")
 local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
 local Cleanup = require(hudFolder:WaitForChild("Cleanup"))
 local HUDController = require(hudFolder:WaitForChild("HUDController"))
-local HUDRules = require(sharedRoot:WaitForChild("HUDRules"))
+local Theme = require(hudFolder:WaitForChild("Theme"))
 local scope = Cleanup.new()
 local cameraScope = Cleanup.new()
 
@@ -23,14 +23,15 @@ local TacticalUIRules = require(
 	ReplicatedStorage:WaitForChild("Shared"):WaitForChild("config"):WaitForChild("TacticalUIRules") :: ModuleScript
 )
 
+-- The tactical centre shares the open-world HUD palette (carbon panels, green accent, white text).
 local COLORS = {
-	Background = Color3.fromRGB(19, 26, 27),
-	Surface = Color3.fromRGB(31, 42, 41),
-	SurfaceActive = Color3.fromRGB(51, 77, 66),
-	Accent = Color3.fromRGB(183, 202, 145),
-	Text = Color3.fromRGB(242, 241, 226),
-	Muted = Color3.fromRGB(183, 190, 177),
-	Danger = Color3.fromRGB(193, 100, 79),
+	Background = Theme.Color.Panel,
+	Surface = Theme.Color.PanelRaised,
+	SurfaceActive = Theme.Color.AccentDeep,
+	Accent = Theme.Color.Accent,
+	Text = Theme.Color.Text,
+	Muted = Theme.Color.Muted,
+	Danger = Theme.Color.Health,
 }
 
 local currentTextScale = 1
@@ -92,20 +93,14 @@ local function addButton(parent: Instance, name: string, text: string, order: nu
 	return button
 end
 
-local menuButton = Instance.new("TextButton")
-menuButton.Name = "MenuToggle"
-menuButton.AnchorPoint = Vector2.zero
-menuButton.Position = UDim2.fromOffset(80, 8)
-menuButton.Size = UDim2.fromOffset(94, 48)
-menuButton.BackgroundColor3 = COLORS.SurfaceActive
-menuButton.BorderSizePixel = 0
-menuButton.Font = Enum.Font.GothamBold
-menuButton.Text = "TAB  MENU"
-menuButton.TextColor3 = COLORS.Text
-menuButton.TextSize = 14
-menuButton:SetAttribute("BaseTextSize", 14)
-menuButton.Parent = screen
-round(menuButton, 8)
+-- The menu button now belongs to the open-world HUD view (HUDView.MenuButton); this script only owns
+-- the tactical centre window and tells the HUD whether it is open.
+local controller: any = nil
+local function setMenuOpen(open: boolean)
+	if controller ~= nil and controller.View ~= nil then
+		controller.View:SetMenuOpen(open)
+	end
+end
 
 local hub = Instance.new("Frame")
 hub.Name = "TacticalMenu"
@@ -266,9 +261,6 @@ local function updateProfile()
 	end
 	local profile = TacticalUIRules.GetProfile(viewport.X, viewport.Y)
 	currentTextScale = profile.Scale
-	local hudProfile = HUDRules.Profile(viewport.X, viewport.Y)
-	menuButton.Position = UDim2.fromOffset(80, if hudProfile.Compact then 8 else 194)
-	menuButton.Size = UDim2.fromOffset(94, 48)
 	hub.Size = UDim2.fromOffset(profile.PanelWidth, profile.PanelHeight)
 	hubConstraint.MinSize = Vector2.new(math.min(280, profile.PanelWidth), math.min(240, profile.PanelHeight))
 	hubConstraint.MaxSize = Vector2.new(profile.PanelWidth, profile.PanelHeight)
@@ -280,7 +272,6 @@ local function updateProfile()
 			end
 		end
 	end
-	menuButton.Text = if profile.IsCompact then "MENU" else "TAB  MENU"
 end
 
 local function setPage(page: string)
@@ -341,7 +332,7 @@ local function openMenu()
 	end
 	setPage("home")
 	hub.Visible = true
-	menuButton.Text = "CERRAR"
+	setMenuOpen(true)
 	if refreshSquads ~= nil then
 		task.spawn(refreshSquads)
 	end
@@ -356,22 +347,32 @@ closeMenu = function()
 		gui.Enabled = false
 	end
 	hub.Visible = false
-	menuButton.Text = if TacticalUIRules.GetProfile(
-			(Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize.X) or 1280,
-			(Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize.Y) or 720
-		).IsCompact
-		then "MENU"
-		else "TAB  MENU"
+	setMenuOpen(false)
 end
 
 openPanel = function(id: string)
+	-- Left-menu entries that live inside the tactical centre rather than in their own window.
+	if id == "squad" then
+		if not hub.Visible then
+			openMenu()
+		end
+		setPage("squad")
+		return
+	elseif id == "inventory" then
+		if hub.Visible and header.Text == "CENTRO TACTICO" then
+			closeMenu()
+		else
+			openMenu()
+		end
+		return
+	end
 	closeMenu()
 	local gui = playerGui:FindFirstChild(viewGuiNames[id] or "")
 	if gui ~= nil and gui:IsA("ScreenGui") then
 		viewGuis[id] = gui
 		gui.Enabled = true
 		playerGui:SetAttribute("SierraMenuOpen", true)
-		menuButton.Text = "VOLVER"
+		setMenuOpen(true)
 		if id == "radio" and refreshRadio ~= nil then
 			refreshRadio()
 		end
@@ -386,14 +387,6 @@ openPanel = function(id: string)
 		subheader.Text = "Sistema cargando; vuelve a intentarlo"
 	end
 end
-
-menuButton.Activated:Connect(function()
-	if hub.Visible then
-		closeMenu()
-	else
-		openMenu()
-	end
-end)
 
 local function makeRosterRow(order: number, text: string, actionText: string?, callback: (() -> ())?)
 	local row = Instance.new("Frame")
@@ -777,7 +770,7 @@ scope:Connect(screen:GetPropertyChangedSignal("AbsoluteSize"), updateProfile)
 scope:Connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), bindCamera)
 bindCamera()
 local shared = ReplicatedStorage.Shared
-local controller = HUDController.new({
+controller = HUDController.new({
 	Player = player,
 	PlayerGui = playerGui,
 	Workspace = Workspace,
@@ -790,7 +783,14 @@ local controller = HUDController.new({
 	TextChatService = game:GetService("TextChatService"),
 	MapConfig = require(shared.config:WaitForChild("MapConfig")),
 	LogisticsConfig = require(shared.config:WaitForChild("LogisticsConfig")),
-}, screen, openPanel)
+}, screen, openPanel, function()
+	-- Same behaviour the old TAB MENU button had: toggle the tactical centre or return from a panel.
+	if hub.Visible or playerGui:GetAttribute("SierraMenuOpen") == true then
+		closeMenu()
+	else
+		openMenu()
+	end
+end)
 controller:Start()
 local function destroy()
 	controller:Stop()

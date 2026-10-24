@@ -15,6 +15,10 @@ local config = require(
 	ReplicatedStorage:WaitForChild("Shared"):WaitForChild("config"):WaitForChild("InventoryConfig") :: ModuleScript
 )
 local uiRules = require(ReplicatedStorage.Shared.config:WaitForChild("TacticalUIRules") :: ModuleScript)
+local HUDLayout = require(ReplicatedStorage.Shared:WaitForChild("HUDLayout") :: ModuleScript)
+local hudFolder = script.Parent:WaitForChild("hud")
+local Theme = require(hudFolder:WaitForChild("Theme") :: ModuleScript)
+local Icons = require(hudFolder:WaitForChild("Icons") :: ModuleScript)
 local recoilRandom = Random.new()
 local status: any = nil
 
@@ -37,27 +41,27 @@ reticle.TextColor3 = Color3.new(1, 1, 1)
 reticle.TextStrokeTransparency = 0.3
 reticle.Parent = screen
 
-local controls = Instance.new("Frame")
-controls.Name = "TouchActions"
-controls.AnchorPoint = Vector2.new(1, 1)
--- Reserve the bottom-right region for Roblox's jump button.
-controls.Position = UDim2.new(1, -24, 1, -150)
-controls.Size = UDim2.fromOffset(176, 120)
-controls.BackgroundTransparency = 1
-controls.Parent = screen
+-- Touch buttons share the HUD's safe-area coordinate space so HUDLayout can keep them clear of the
+-- native thumbstick/jump areas and of every other HUD element.
+local touchScreen = Instance.new("ScreenGui")
+touchScreen.Name = "SierraCombatTouch"
+touchScreen.ResetOnSpawn = false
+touchScreen.IgnoreGuiInset = false
+touchScreen.ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets
+touchScreen.SafeAreaCompatibility = Enum.SafeAreaCompatibility.None
+touchScreen.DisplayOrder = 10
+touchScreen.Parent = playerGui
 
 local feedback = Instance.new("TextLabel")
 feedback.Name = "CombatFeedback"
-feedback.AnchorPoint = Vector2.new(0.5, 1)
-feedback.Position = UDim2.new(0.5, 0, 1, -24)
-feedback.Size = UDim2.new(0.6, 0, 0, 48)
 feedback.BackgroundTransparency = 1
-feedback.TextColor3 = Color3.new(1, 1, 1)
-feedback.TextStrokeTransparency = 0.3
-feedback.TextSize = 16
+feedback.Font = Enum.Font.GothamBold
+feedback.TextColor3 = Theme.Color.Text
+feedback.TextStrokeTransparency = 0.5
+feedback.TextSize = 15
 feedback.TextWrapped = true
 feedback.Text = ""
-feedback.Parent = screen
+feedback.Parent = touchScreen
 
 local function canAct(): boolean
 	local character = player.Character
@@ -104,38 +108,44 @@ local function request(action: string, weaponId: string?)
 	combatRemote:FireServer({ action = "shoot", direction = { x = direction.X, y = direction.Y, z = direction.Z } })
 end
 
-local function addButton(
-	name: string,
-	title: string,
-	column: number,
-	row: number,
-	action: string,
-	weaponId: string?
-): TextButton
-	local button = Instance.new("TextButton")
-	button.Name = name
-	button.Position = UDim2.fromOffset(column * 92, row * 64)
-	button.Size = UDim2.fromOffset(84, 56)
-	button.BackgroundColor3 = Color3.fromRGB(31, 42, 41)
-	button.BackgroundTransparency = 0.15
-	button.TextColor3 = Color3.new(1, 1, 1)
-	button.TextSize = 15
-	button.TextWrapped = true
-	button.Text = title
-	button.Parent = controls
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = button
+local function addRoundButton(name: string, icon: string, tint: Color3, action: string): (TextButton, Frame, TextLabel)
+	local button = Theme.Button(touchScreen, name)
+	Theme.Round(button)
+	local iconBox = Instance.new("Frame")
+	iconBox.Name = "IconBox"
+	iconBox.BackgroundTransparency = 1
+	iconBox.AnchorPoint = Vector2.new(0.5, 0.5)
+	iconBox.Position = UDim2.fromScale(0.5, 0.5)
+	iconBox.Size = UDim2.fromScale(0.52, 0.52)
+	iconBox.Parent = button
+	Icons.Draw(iconBox, icon, tint, Theme.Color.Panel)
+	local caption = Theme.Label(button, "Caption", "", 13, Theme.Color.Text, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+	caption.Size = UDim2.fromScale(1, 1)
+	caption.Visible = false
 	button.Activated:Connect(function()
-		request(action, weaponId)
+		request(action, nil)
 	end)
-	return button
+	return button, iconBox, caption
 end
 
-local rifle = addButton("Rifle", "Fusil", 0, 0, "equip", "Rifle")
-local sidearm = addButton("Sidearm", "Pistola", 0, 1, "equip", "Sidearm")
-local fire = addButton("Fire", "Disparar", 1, 0, "shoot", nil)
-local reload = addButton("Reload", "Recargar", 1, 1, "reload", nil)
+-- Weapons are chosen from the HUD quick slots (and keys 1/2); only fire and reload need big buttons.
+local fire, fireIcon, fireCaption = addRoundButton("Fire", "bullet", Theme.Color.Accent, "shoot")
+local reload, reloadIcon, reloadCaption = addRoundButton("Reload", "magazine", Theme.Color.Text, "reload")
+
+local layout: any = nil
+local function updateLayout()
+	local size = touchScreen.AbsoluteSize
+	layout = HUDLayout.Compute(size.X, size.Y, { Mode = "walking", Touch = true })
+	local function place(gui: GuiObject, rect: any)
+		gui.Position = UDim2.fromOffset(rect.X, rect.Y)
+		gui.Size = UDim2.fromOffset(rect.W, rect.H)
+	end
+	place(fire, layout.Fire)
+	place(reload, layout.Reload)
+	place(feedback, { X = layout.Notice.X, Y = layout.Notice.Y - 32, W = layout.Notice.W, H = 30 })
+end
+touchScreen:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateLayout)
+updateLayout()
 
 local function bind(name: string, action: string, weaponId: string?, key: EnumItem)
 	ContextActionService:BindAction(name, function(_, inputState)
@@ -207,26 +217,28 @@ RunService.Heartbeat:Connect(function(deltaSeconds)
 	end
 	elapsed = 0
 	local available = canAct()
-	local camera = Workspace.CurrentCamera
-	local height = if camera ~= nil then camera.ViewportSize.Y else 720
-	controls.Position = UDim2.new(1, -24, 1, -math.min(150, math.floor(height * 0.32)))
-	controls.Visible = UserInputService.TouchEnabled and available
 	reticle.Visible = available
-	local weaponId = if status ~= nil then status.equippedWeaponId else nil
-	local weapon = if status ~= nil then status.weapons[weaponId] else nil
-	local reloading = weapon ~= nil and weapon.isReloading == true
-	for _, button in ipairs({ rifle, sidearm }) do
-		button.Interactable = not reloading
-		button.BackgroundColor3 = if button.Name == weaponId
-			then Color3.fromRGB(51, 100, 66)
-			else Color3.fromRGB(31, 42, 41)
+	local touchVisible = UserInputService.TouchEnabled and available
+	fire.Visible, reload.Visible = touchVisible, touchVisible
+	if not touchVisible then
+		return
 	end
-	fire.Interactable = not reloading and weapon ~= nil and weapon.magazine > 0
-	fire.Text = if weapon ~= nil and weapon.magazine <= 0 then "Sin municion" else "Disparar"
+	local weaponId = if status ~= nil then status.equippedWeaponId else nil
+	local weapon = if status ~= nil and weaponId ~= nil then status.weapons[weaponId] else nil
+	local reloading = weapon ~= nil and weapon.isReloading == true
+	local empty = weapon ~= nil and weapon.magazine <= 0
+	fire.Interactable = not reloading and weapon ~= nil and not empty
+	fire.BackgroundTransparency = if fire.Interactable then 0.18 else 0.55
+	fireIcon.Visible = not empty
+	fireCaption.Visible = empty
+	fireCaption.Text = if empty then "VACÍO" else ""
+	fireCaption.TextColor3 = Theme.Color.Health
 	reload.Interactable = not reloading
+	reloadIcon.Visible = not reloading
+	reloadCaption.Visible = reloading
 	if reloading and type(weapon.reloadEndsAt) == "number" then
-		reload.Text = string.format("Recarga %.1fs", math.max(0, weapon.reloadEndsAt - Workspace:GetServerTimeNow()))
+		reloadCaption.Text = string.format("%.1f", math.max(0, weapon.reloadEndsAt - Workspace:GetServerTimeNow()))
 	else
-		reload.Text = if reloading then "Recargando" else "Recargar"
+		reloadCaption.Text = ""
 	end
 end)

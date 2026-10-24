@@ -147,3 +147,33 @@ Todas las filas siguientes están **pendientes**, no aprobadas por los resultado
 11. Medir memoria/FPS y tráfico en hardware real; revisar especialmente el dibujo periódico de caminos y la frecuencia de remotos. No hay mediciones de rendimiento del motor en esta entrega.
 
 No se afirma funcionamiento completo del HUD ni compatibilidad móvil verificada hasta terminar esta matriz.
+
+
+---
+
+# Rediseño del HUD de mundo abierto (rama `feature/hud-open-world`)
+
+Estado: implementado y verificado por CLI; **Roblox Studio y dispositivos reales siguen pendientes**. Ver la sección "HUD de mundo abierto" del README para el mapa de zonas y fuentes de datos.
+
+## Verificación ejecutada
+
+| Comprobación | Resultado |
+|---|---|
+| `node scripts/check-phase2.mjs` | Pasa (incluye los módulos nuevos en el sourcemap) |
+| `scripts/check-mobile.mjs` | 161 + 168 comprobaciones pasan (el arnés del HUD subió de 148 a 168) |
+| Fases 3-11 | Pasan; fase 10: 6341 comprobaciones (layout en 9 tamaños x 2 modos x chat abierto/cerrado) |
+| `luau-compile` | 62 archivos compilan |
+| `luau-analyze` | Sin errores en `HUDRules`, `HUDLayout`, `VehicleInputRules`, configuraciones y `tests/phase*.test.luau` (los mismos archivos que usa el CI, más los dos módulos de HUD) |
+| `rojo build` | Genera `build/sierradeguardia.rbxlx` |
+
+El arnés usa dobles de las APIs de Roblox: no renderiza GUI, no valida fuentes ni replicación.
+
+## Matriz pendiente en Studio (HUD nuevo)
+
+1. **Chat nativo arriba a la izquierda:** comprobar que la ventana nativa de `TextChatService` queda bajo los botones de chat/menú y no los tapa. `ChatWindowConfiguration` solo permite alineación y escala, no desplazamiento en píxeles; si se superpone, hay que reservar ese margen en `HUDLayout.Compute` (`chatY`).
+2. Tamaños: 360x640, 667x375, 812x375, tableta, rotación y áreas seguras (la raíz usa `CoreUISafeInsets`). Comprobar que el texto de 12-13 px es legible en Android.
+3. Con la camioneta: pedales, dirección, freno, salir y cámara; arma y ranuras se ocultan y vuelven al bajar o reaparecer.
+4. Ranuras rápidas: vendaje/botiquín (cuentas reales), equipar fusil/pistola, y que el botón Inventario abra el centro táctil.
+5. Disparar y Recargar táctiles junto al joystick y el botón de salto nativos; sin disparo al arrastrar la cámara.
+6. Menú izquierdo: Facciones, Inventario, Vehículos y Misiones abren su panel; el botón de menú muestra "cerrar" mientras hay un panel abierto.
+7. Rendimiento: el minimapa dibuja ~250 segmentos de camino; solo se reposicionan cuando el jugador se mueve 0,5 studs. Medir FPS/memoria en un Android modesto.
