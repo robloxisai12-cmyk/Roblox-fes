@@ -336,3 +336,25 @@ La conducción utiliza intenciones validadas en el remoto existente, con caducid
 `node scripts/check-mobile.mjs` ejecuta las regresiones anteriores y el nuevo arnés del HUD/logística; acepta `LUAU_BIN` para localizar Luau. La integración compila con el proyecto y workflow existentes, sin cambios de publicación.
 
 Consulta [contratos, archivos, resultados de pruebas y matriz de Studio](docs/hud-verification.md). **Roblox Studio y dispositivos reales siguen pendientes**; la compilación y los dobles de APIs no demuestran funcionamiento completo dentro del motor.
+
+
+## HUD de mundo abierto (rediseño)
+
+Sustituye por completo el aspecto del HUD anterior (paneles "SALUD / MUNICION", botones de texto *Fusil / Pistola / Disparar / Recargar*, botón *TAB MENU*, etiquetas "Nav" de texto) por una interfaz de mundo abierto: paneles carbón translúcidos, acento verde, texto blanco, iconos dibujados con instancias nativas (sin assets externos). Las mecánicas, los remotos y la autoridad del servidor **no cambian**.
+
+| Zona | Contenido | Fuente real |
+|---|---|---|
+| Arriba izquierda | Botón de chat, botón de menú, ventana de chat | `TextChatService` nativo (filtro, permisos y comandos de Roblox); solo se restilizan y se dimensionan |
+| Arriba centro | Brújula con marcas cada 15°, rumbo y nombre de zona | Orientación del personaje/vehículo; zonas de `MapConfig` y `LogisticsConfig` |
+| Arriba derecha | Barra de salud, condición (estable/herido/sangrando/incapacitado) y rol | `Humanoid` + snapshot de `MedicalService` |
+| Derecha | Arma equipada, cargador/reserva, estado de recarga y 5 ranuras rápidas (fusil, pistola, vendaje, botiquín, inventario) | Snapshot de `MedicalService`/`InventoryService`; mismos intents `equip` y `treat` que ya validaba el servidor |
+| Izquierda | Facciones, Inventario, Vehículos, Misiones; en teléfonos son accesos con icono | Abren los paneles reales (escuadrones, inventario del centro táctico, logística, misión) |
+| Abajo izquierda | Minimapa circular con caminos reales, depósito (D) y punto logístico (L), acceso a Radio | `MapConfig.Roads`, `LogisticsConfig.SupplyPoints` |
+| Abajo derecha | Botones redondos Disparar y Recargar (solo táctil, a pie) | `CombatController` (mismo raycast autoritativo) |
+| Modo vehículo | Telemetría (nombre, velocidad en studs/s, combustible), pedales, dirección, freno, salir y cámara; se ocultan arma y ranuras | `LogisticsService` y asiento real `DriverSeat` |
+
+Cambia solo cuando el asiento real del personaje pertenece a una camioneta (`HUDRules.Mode`): al salir o reaparecer vuelve el HUD a pie. Un solo `ScreenGui` (`SierraTacticalHUD`) contiene el HUD; `CombatController` añade `SierraCombatTouch` con los dos botones de combate. Todas las posiciones salen de `src/shared/HUDLayout.luau` (matemática pura), que las pruebas verifican en 9 tamaños de pantalla: nada sale de la pantalla, nada se superpone y se respetan las zonas nativas del joystick y del salto.
+
+**No se muestran porque el proyecto no tiene el sistema real:** dinero/economía, hora del juego (no hay ciclo día/noche), hambre, sed, energía/resistencia, combustible fuera del vehículo, voz. Para añadirlos, primero hay que crear el sistema autoritativo en el servidor y exponer su snapshot; después basta con una fila nueva en `HUDView` y en `HUDLayout`.
+
+Archivos nuevos: `src/shared/HUDLayout.luau`, `src/client/hud/Theme.luau`, `src/client/hud/Icons.luau`. Modificados: `src/shared/HUDRules.luau` (zona, brújula, condición; `Profile` pasó a `HUDLayout`), `src/client/hud/HUDView.luau`, `src/client/hud/HUDController.luau`, `src/client/TacticalHUD.client.luau`, `src/client/CombatController.client.luau`, `tests/phase10.test.luau`, `tests/hud-runtime.luau`, `scripts/check-mobile.mjs`, `scripts/check-phase2.mjs`.

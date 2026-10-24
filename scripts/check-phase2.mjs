@@ -237,6 +237,18 @@ try {
 			"ModuleScript",
 			"src/server/services/MatchService.luau",
 		],
+		["SierraDeGuardia/ReplicatedStorage/Shared/HUDLayout", "ModuleScript", "src/shared/HUDLayout.luau"],
+		["SierraDeGuardia/ReplicatedStorage/Shared/HUDRules", "ModuleScript", "src/shared/HUDRules.luau"],
+		[
+			"SierraDeGuardia/StarterPlayer/StarterPlayerScripts/Client/hud/Theme",
+			"ModuleScript",
+			"src/client/hud/Theme.luau",
+		],
+		[
+			"SierraDeGuardia/StarterPlayer/StarterPlayerScripts/Client/hud/Icons",
+			"ModuleScript",
+			"src/client/hud/Icons.luau",
+		],
 		[
 			"SierraDeGuardia/StarterPlayer/StarterPlayerScripts/Client/CombatController",
 			"LocalScript",

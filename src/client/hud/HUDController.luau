@@ -2,20 +2,77 @@
 local Cleanup = require(script.Parent.Cleanup)
 local GameAdapter = require(script.Parent.GameAdapter)
 local HUDView = require(script.Parent.HUDView)
+local Theme = require(script.Parent.Theme)
 local VehicleControls = require(script.Parent.VehicleControls)
 local HUDController = {}
 HUDController.__index = HUDController
 
-function HUDController.new(services: any, screen: ScreenGui, openPanel: (string) -> ())
+-- Native TextChatService properties restyled to match the HUD. Each one is restored on Stop.
+local CHAT_WINDOW_STYLE = {
+	BackgroundColor3 = Theme.Color.Panel,
+	BackgroundTransparency = 0.3,
+	TextColor3 = Theme.Color.Text,
+	TextSize = 15,
+}
+local CHAT_INPUT_STYLE = {
+	BackgroundColor3 = Theme.Color.Panel,
+	BackgroundTransparency = 0.2,
+	TextColor3 = Theme.Color.Text,
+	TextSize = 15,
+}
+
+local function remember(target: any, style: { [string]: any }): { [string]: any }
+	local previous = {}
+	for property in pairs(style) do
+		local ok, value = pcall(function()
+			return target[property]
+		end)
+		if ok then
+			previous[property] = value
+		end
+	end
+	return previous
+end
+
+local function apply(target: any, values: { [string]: any })
+	for property, value in pairs(values) do
+		pcall(function()
+			target[property] = value
+		end)
+	end
+end
+
+function HUDController.new(services: any, screen: ScreenGui, openPanel: (string) -> (), toggleMenu: (() -> ())?)
 	return setmetatable({
 		Services = services,
 		Screen = screen,
 		OpenPanel = openPanel,
+		ToggleMenu = toggleMenu,
 		Scope = Cleanup.new(),
 		CameraScope = Cleanup.new(),
 		Adapter = GameAdapter.new(services),
 		Started = false,
+		ChatWindow = nil,
+		ChatInput = nil,
+		ChatTouched = false,
 	}, HUDController)
+end
+
+-- The chat window is the platform one (filtering, permissions and commands stay Roblox's); only its
+-- size and look follow the HUD layout. Until the player toggles it, it follows the screen profile.
+function HUDController:SyncChat()
+	local chatWindow = self.ChatWindow
+	local geometry = self.View.Geometry
+	if chatWindow == nil or geometry == nil then
+		return
+	end
+	if not self.ChatTouched then
+		local wanted = not geometry.Profile.Compact
+		self.View.ChatExpanded = wanted
+		chatWindow.Enabled = wanted
+	end
+	chatWindow.WidthScale = math.clamp(geometry.Chat.W / geometry.Width, 0.2, 0.9)
+	chatWindow.HeightScale = math.clamp(geometry.Chat.H / geometry.Height, 0.15, 0.7)
 end
 
 function HUDController:Layout()
@@ -26,6 +83,7 @@ function HUDController:Layout()
 		size = if camera ~= nil then camera.ViewportSize else Vector2.new(1280, 720)
 	end
 	self.View:Layout(size.X, size.Y, self.Services.UserInputService.TouchEnabled)
+	self:SyncChat()
 end
 
 function HUDController:Start()
@@ -38,6 +96,56 @@ function HUDController:Start()
 	self.Controls = VehicleControls.new(s, self.Adapter, self.View, s.LogisticsConfig)
 	self.Adapter:Start()
 	self.Controls:Start()
+
+	-- Native chat: reuse the platform window/input, restyled; fall back to the classic chat toggle.
+	local chatWindow = s.TextChatService:FindFirstChildOfClass("ChatWindowConfiguration")
+	local chatInput = s.TextChatService:FindFirstChildOfClass("ChatInputBarConfiguration")
+	local nativeChat = chatWindow ~= nil
+		and chatInput ~= nil
+		and s.TextChatService.ChatVersion == Enum.ChatVersion.TextChatService
+	if nativeChat then
+		local previousWindow = remember(chatWindow, CHAT_WINDOW_STYLE)
+		local previousInput = remember(chatInput, CHAT_INPUT_STYLE)
+		local previous = {
+			Enabled = chatWindow.Enabled,
+			HorizontalAlignment = chatWindow.HorizontalAlignment,
+			VerticalAlignment = chatWindow.VerticalAlignment,
+			WidthScale = chatWindow.WidthScale,
+			HeightScale = chatWindow.HeightScale,
+			InputEnabled = chatInput.Enabled,
+		}
+		self.ChatWindow, self.ChatInput = chatWindow, chatInput
+		chatWindow.HorizontalAlignment = Enum.HorizontalAlignment.Left
+		chatWindow.VerticalAlignment = Enum.VerticalAlignment.Top
+		apply(chatWindow, CHAT_WINDOW_STYLE)
+		apply(chatInput, CHAT_INPUT_STYLE)
+		self.Scope:Connect(self.View.Chat.Activated, function()
+			self.ChatTouched = true
+			chatWindow.Enabled = not chatWindow.Enabled
+			self.View.ChatExpanded = chatWindow.Enabled
+			chatInput.Enabled = true
+		end)
+		self.Scope:Add(function()
+			self.ChatWindow, self.ChatInput = nil, nil
+			chatWindow.Enabled = previous.Enabled
+			chatWindow.HorizontalAlignment, chatWindow.VerticalAlignment =
+				previous.HorizontalAlignment, previous.VerticalAlignment
+			chatWindow.WidthScale, chatWindow.HeightScale = previous.WidthScale, previous.HeightScale
+			chatInput.Enabled = previous.InputEnabled
+			apply(chatWindow, previousWindow)
+			apply(chatInput, previousInput)
+		end)
+	else
+		self.Scope:Connect(self.View.Chat.Activated, function()
+			local ok = pcall(function()
+				s.StarterGui:SetCore("ChatActive", true)
+			end)
+			if not ok then
+				self.View.Notice.Text = "Chat nativo no disponible en esta sesion"
+			end
+		end)
+	end
+
 	local function bindCamera()
 		self.CameraScope:Clean()
 		local camera = s.Workspace.CurrentCamera
@@ -53,11 +161,20 @@ function HUDController:Start()
 		self:Layout()
 	end)
 	bindCamera()
+
+	-- Menu button, left menu / shortcut row and radio all open the real panels.
+	if self.ToggleMenu ~= nil then
+		local toggle = self.ToggleMenu
+		self.Scope:Connect(self.View.MenuButton.Activated, function()
+			toggle()
+		end)
+	end
 	for id, control in pairs(self.View.NavButtons) do
 		self.Scope:Connect(control.Activated, function()
 			self.OpenPanel(id)
 		end)
 	end
+	-- Quick slots send the same intents as the keyboard: the server validates every one of them.
 	for id, control in pairs(self.View.Weapons) do
 		self.Scope:Connect(control.Activated, function()
 			local state = self.Adapter:GetState()
@@ -66,45 +183,18 @@ function HUDController:Start()
 			end
 		end)
 	end
-	local chatWindow = s.TextChatService:FindFirstChildOfClass("ChatWindowConfiguration")
-	local chatInput = s.TextChatService:FindFirstChildOfClass("ChatInputBarConfiguration")
-	if chatWindow ~= nil and chatInput ~= nil and s.TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
-		local previous = {
-			Enabled = chatWindow.Enabled,
-			HorizontalAlignment = chatWindow.HorizontalAlignment,
-			VerticalAlignment = chatWindow.VerticalAlignment,
-			WidthScale = chatWindow.WidthScale,
-			HeightScale = chatWindow.HeightScale,
-			InputEnabled = chatInput.Enabled,
-		}
-		chatWindow.HorizontalAlignment = Enum.HorizontalAlignment.Left
-		chatWindow.VerticalAlignment = Enum.VerticalAlignment.Top
-		chatWindow.WidthScale = 0.7
-		chatWindow.HeightScale = 0.6
-		chatWindow.Enabled = not self.View.Profile.Compact
-		-- Use the platform input, filtering and permissions; never relay user chat through a custom remote.
-		self.Scope:Connect(self.View.Chat.Activated, function()
-			chatWindow.Enabled = not chatWindow.Enabled
-			self.View.ChatExpanded = chatWindow.Enabled
-			chatInput.Enabled = true
-		end)
-		self.Scope:Add(function()
-			chatWindow.Enabled = previous.Enabled
-			chatWindow.HorizontalAlignment, chatWindow.VerticalAlignment =
-				previous.HorizontalAlignment, previous.VerticalAlignment
-			chatWindow.WidthScale, chatWindow.HeightScale = previous.WidthScale, previous.HeightScale
-			chatInput.Enabled = previous.InputEnabled
-		end)
-	else
-		self.Scope:Connect(self.View.Chat.Activated, function()
-			local ok = pcall(function()
-				s.StarterGui:SetCore("ChatActive", true)
-			end)
-			if not ok then
-				self.View.Notice.Text = "Chat nativo no disponible en esta sesion"
+	for id, control in pairs(self.View.Items) do
+		self.Scope:Connect(control.Activated, function()
+			local state = self.Adapter:GetState()
+			if state.Mode == "walking" and not state.Blocked then
+				s.CombatRemote:FireServer({ action = "treat", itemId = id, targetUserId = s.Player.UserId })
 			end
 		end)
 	end
+	self.Scope:Connect(self.View.Slots.Inventory.Activated, function()
+		self.OpenPanel("inventory")
+	end)
+
 	local noticeRemaining = 0
 	self.Scope:Connect(s.CombatRemote.OnClientEvent, function(message)
 		if type(message) ~= "table" or message.action ~= "logistics_result" then
