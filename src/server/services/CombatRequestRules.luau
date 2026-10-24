@@ -16,6 +16,8 @@ type LogisticsRequest = {
 	pointId: string?,
 	resourceId: string?,
 	amount: number?,
+	throttle: number?,
+	steer: number?,
 }
 
 local CombatRequestRules = {}
@@ -50,7 +52,8 @@ function CombatRequestRules.Validate(value: any, argumentCount: number): (ValidR
 		if type(direction) ~= "table" or getmetatable(direction) ~= nil then
 			return nil, "invalid_direction"
 		end
-		if not hasOnlyFields(direction, { x = true, y = true, z = true })
+		if
+			not hasOnlyFields(direction, { x = true, y = true, z = true })
 			or not isFiniteNumber(direction.x)
 			or not isFiniteNumber(direction.y)
 			or not isFiniteNumber(direction.z)
@@ -132,6 +135,24 @@ function CombatRequestRules.Validate(value: any, argumentCount: number): (ValidR
 				return nil, "unexpected_field"
 			end
 			return normalized, nil
+		elseif operation == "drive" then
+			allowedFields.vehicleId = true
+			allowedFields.throttle = true
+			allowedFields.steer = true
+			if
+				type(value.vehicleId) ~= "string"
+				or #value.vehicleId < 1
+				or #value.vehicleId > 32
+				or not isFiniteNumber(value.throttle)
+				or math.abs(value.throttle) > 1
+				or not isFiniteNumber(value.steer)
+				or math.abs(value.steer) > 1
+			then
+				return nil, "invalid_drive_input"
+			end
+			normalized.vehicleId = value.vehicleId
+			normalized.throttle = value.throttle
+			normalized.steer = value.steer
 		elseif operation == "enter_vehicle" or operation == "exit_vehicle" or operation == "deliver_cargo" then
 			allowedFields.vehicleId = true
 			local vehicleId = value.vehicleId
@@ -146,10 +167,18 @@ function CombatRequestRules.Validate(value: any, argumentCount: number): (ValidR
 			local vehicleId = value.vehicleId
 			local resourceId = value.resourceId
 			local amount = value.amount
-			if type(vehicleId) ~= "string" or #vehicleId < 1 or #vehicleId > 32
-				or type(resourceId) ~= "string" or #resourceId < 1 or #resourceId > 32
-				or type(amount) ~= "number" or not isFiniteNumber(amount)
-				or amount < 1 or amount > 8 or amount % 1 ~= 0
+			if
+				type(vehicleId) ~= "string"
+				or #vehicleId < 1
+				or #vehicleId > 32
+				or type(resourceId) ~= "string"
+				or #resourceId < 1
+				or #resourceId > 32
+				or type(amount) ~= "number"
+				or not isFiniteNumber(amount)
+				or amount < 1
+				or amount > 8
+				or amount % 1 ~= 0
 			then
 				return nil, "invalid_logistics_request"
 			end
@@ -163,10 +192,18 @@ function CombatRequestRules.Validate(value: any, argumentCount: number): (ValidR
 			local pointId = value.pointId
 			local resourceId = value.resourceId
 			local amount = value.amount
-			if type(pointId) ~= "string" or #pointId < 1 or #pointId > 32
-				or type(resourceId) ~= "string" or #resourceId < 1 or #resourceId > 32
-				or type(amount) ~= "number" or not isFiniteNumber(amount)
-				or amount < 1 or amount > 8 or amount % 1 ~= 0
+			if
+				type(pointId) ~= "string"
+				or #pointId < 1
+				or #pointId > 32
+				or type(resourceId) ~= "string"
+				or #resourceId < 1
+				or #resourceId > 32
+				or type(amount) ~= "number"
+				or not isFiniteNumber(amount)
+				or amount < 1
+				or amount > 8
+				or amount % 1 ~= 0
 			then
 				return nil, "invalid_logistics_request"
 			end
@@ -178,8 +215,13 @@ function CombatRequestRules.Validate(value: any, argumentCount: number): (ValidR
 			allowedFields.pointId = true
 			local vehicleId = value.vehicleId
 			local pointId = value.pointId
-			if type(vehicleId) ~= "string" or #vehicleId < 1 or #vehicleId > 32
-				or type(pointId) ~= "string" or #pointId < 1 or #pointId > 32
+			if
+				type(vehicleId) ~= "string"
+				or #vehicleId < 1
+				or #vehicleId > 32
+				or type(pointId) ~= "string"
+				or #pointId < 1
+				or #pointId > 32
 			then
 				return nil, "invalid_logistics_request"
 			end

@@ -6,6 +6,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
+local hudFolder = script.Parent:WaitForChild("hud")
+local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local Cleanup = require(hudFolder:WaitForChild("Cleanup"))
+local HUDController = require(hudFolder:WaitForChild("HUDController"))
+local HUDRules = require(sharedRoot:WaitForChild("HUDRules"))
+local scope = Cleanup.new()
+local cameraScope = Cleanup.new()
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -30,6 +38,8 @@ local screen = Instance.new("ScreenGui")
 screen.Name = "SierraTacticalHUD"
 screen.ResetOnSpawn = false
 screen.IgnoreGuiInset = false
+screen.ScreenInsets = Enum.ScreenInsets.CoreUISafeInsets
+screen.SafeAreaCompatibility = Enum.SafeAreaCompatibility.None
 screen.DisplayOrder = 20
 screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screen.Parent = playerGui
@@ -82,37 +92,10 @@ local function addButton(parent: Instance, name: string, text: string, order: nu
 	return button
 end
 
-local statusCard = Instance.new("Frame")
-statusCard.Name = "StatusCard"
-statusCard.Position = UDim2.new(0, 12, 0, 12)
-statusCard.Size = UDim2.new(0.7, 0, 0, 102)
-statusCard.BackgroundColor3 = COLORS.Background
-statusCard.BackgroundTransparency = 0.12
-statusCard.BorderSizePixel = 0
-statusCard.Parent = screen
-round(statusCard, 8)
-
-local statusConstraint = Instance.new("UISizeConstraint")
-statusConstraint.MinSize = Vector2.new(180, 102)
-statusConstraint.MaxSize = Vector2.new(340, 102)
-statusConstraint.Parent = statusCard
-
-local healthText = addText(statusCard, "Health", "SALUD  -- / --", 18, COLORS.Text, Enum.Font.GothamBold)
-healthText.Position = UDim2.new(0, 12, 0, 8)
-healthText.Size = UDim2.new(1, -24, 0, 25)
-
-local conditionText = addText(statusCard, "Condition", "Estado: sincronizando", 14, COLORS.Accent)
-conditionText.Position = UDim2.new(0, 12, 0, 34)
-conditionText.Size = UDim2.new(1, -24, 0, 21)
-
-local ammoText = addText(statusCard, "Ammunition", "MUNICION  --", 14, COLORS.Text, Enum.Font.GothamSemibold)
-ammoText.Position = UDim2.new(0, 12, 0, 58)
-ammoText.Size = UDim2.new(1, -24, 0, 20)
-
 local menuButton = Instance.new("TextButton")
 menuButton.Name = "MenuToggle"
-menuButton.AnchorPoint = Vector2.new(1, 0)
-menuButton.Position = UDim2.new(1, -12, 0, 12)
+menuButton.AnchorPoint = Vector2.zero
+menuButton.Position = UDim2.fromOffset(80, 8)
 menuButton.Size = UDim2.fromOffset(94, 48)
 menuButton.BackgroundColor3 = COLORS.SurfaceActive
 menuButton.BorderSizePixel = 0
@@ -173,7 +156,8 @@ pageLayout.SortOrder = Enum.SortOrder.LayoutOrder
 pageLayout.Parent = pageScroll
 
 local medicalSummary = addText(pageScroll, "InventorySummary", "Cargando equipo del servidor...", 14, COLORS.Text)
-medicalSummary.Size = UDim2.new(1, 0, 0, 102)
+medicalSummary.Size = UDim2.new(1, 0, 0, 170)
+medicalSummary.AutomaticSize = Enum.AutomaticSize.Y
 medicalSummary.LayoutOrder = 1
 medicalSummary.TextYAlignment = Enum.TextYAlignment.Top
 
@@ -260,6 +244,7 @@ local viewGuis: { [string]: ScreenGui } = {}
 local refreshSquads: (() -> ())? = nil
 local refreshRadio: (() -> ())? = nil
 local closeMenu: () -> ()
+local openPanel: (string) -> ()
 
 local function setStatusMessage(text: string)
 	rosterMessage.Text = text
@@ -275,13 +260,15 @@ end
 
 local function updateProfile()
 	local camera = Workspace.CurrentCamera
-	local viewport = if camera ~= nil then camera.ViewportSize else Vector2.new(1280, 720)
+	local viewport = screen.AbsoluteSize
+	if viewport.X <= 0 or viewport.Y <= 0 then
+		viewport = if camera ~= nil then camera.ViewportSize else Vector2.new(1280, 720)
+	end
 	local profile = TacticalUIRules.GetProfile(viewport.X, viewport.Y)
 	currentTextScale = profile.Scale
-	local statusWidth = math.min(profile.PanelWidth, 340, math.max(180, viewport.X - 124))
-	statusCard.Size = UDim2.new(0, statusWidth, 0, 102)
-	statusConstraint.MinSize = Vector2.new(math.min(180, statusWidth), 102)
-	statusConstraint.MaxSize = Vector2.new(statusWidth, 102)
+	local hudProfile = HUDRules.Profile(viewport.X, viewport.Y)
+	menuButton.Position = UDim2.fromOffset(80, if hudProfile.Compact then 8 else 194)
+	menuButton.Size = UDim2.fromOffset(94, 48)
 	hub.Size = UDim2.fromOffset(profile.PanelWidth, profile.PanelHeight)
 	hubConstraint.MinSize = Vector2.new(math.min(280, profile.PanelWidth), math.min(240, profile.PanelHeight))
 	hubConstraint.MaxSize = Vector2.new(profile.PanelWidth, profile.PanelHeight)
@@ -338,28 +325,14 @@ local function setPage(page: string)
 					setPage("squad")
 					return
 				end
-				hub.Visible = false
-				closeMenu()
-				statusCard.Visible = false
-				for _, gui in pairs(viewGuis) do
-					gui.Enabled = false
-				end
-				local gui = viewGuis[item.Id]
-				if gui ~= nil then
-					gui.Enabled = true
-					playerGui:SetAttribute("SierraMenuOpen", true)
-				end
-				if item.Id == "radio" and refreshRadio ~= nil then
-					refreshRadio()
-				end
+				openPanel(item.Id)
 			end)
 		end
 	end
-
-	squadBackButton.Activated:Connect(function()
-		setPage("home")
-	end)
 end
+squadBackButton.Activated:Connect(function()
+	setPage("home")
+end)
 
 local function openMenu()
 	playerGui:SetAttribute("SierraMenuOpen", true)
@@ -368,7 +341,6 @@ local function openMenu()
 	end
 	setPage("home")
 	hub.Visible = true
-	statusCard.Visible = true
 	menuButton.Text = "CERRAR"
 	if refreshSquads ~= nil then
 		task.spawn(refreshSquads)
@@ -380,6 +352,9 @@ end
 
 closeMenu = function()
 	playerGui:SetAttribute("SierraMenuOpen", false)
+	for _, gui in pairs(viewGuis) do
+		gui.Enabled = false
+	end
 	hub.Visible = false
 	menuButton.Text = if TacticalUIRules.GetProfile(
 			(Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize.X) or 1280,
@@ -387,6 +362,29 @@ closeMenu = function()
 		).IsCompact
 		then "MENU"
 		else "TAB  MENU"
+end
+
+openPanel = function(id: string)
+	closeMenu()
+	local gui = playerGui:FindFirstChild(viewGuiNames[id] or "")
+	if gui ~= nil and gui:IsA("ScreenGui") then
+		viewGuis[id] = gui
+		gui.Enabled = true
+		playerGui:SetAttribute("SierraMenuOpen", true)
+		menuButton.Text = "VOLVER"
+		if id == "radio" and refreshRadio ~= nil then
+			refreshRadio()
+		end
+		if id == "medical" then
+			combatRemote:FireServer({ action = "medical_status" })
+		end
+		if id == "logistics" then
+			combatRemote:FireServer({ action = "logistics", operation = "status" })
+		end
+	else
+		openMenu()
+		subheader.Text = "Sistema cargando; vuelve a intentarlo"
+	end
 end
 
 menuButton.Activated:Connect(function()
@@ -416,7 +414,7 @@ local function makeRosterRow(order: number, text: string, actionText: string?, c
 		button.Name = "Action"
 		button.AnchorPoint = Vector2.new(1, 0.5)
 		button.Position = UDim2.new(1, -6, 0.5, 0)
-		button.Size = UDim2.new(0.3, -4, 0, 42)
+		button.Size = UDim2.new(0.3, -4, 0, 44)
 		button.BackgroundColor3 = COLORS.SurfaceActive
 		button.BorderSizePixel = 0
 		button.Font = Enum.Font.GothamSemibold
@@ -568,6 +566,7 @@ sidearmButton.Activated:Connect(function()
 end)
 
 local latestMedicalStatus: any = nil
+local latestInventory: any = nil
 local currentHumanoid: Humanoid? = nil
 local healthConnections: { RBXScriptConnection } = {}
 local function requestMedicalStatus()
@@ -592,24 +591,14 @@ local function renderMedicalStatus(status: any)
 	local bleedRate = if type(status.bleedRate) == "number" then status.bleedRate else 0
 	local incapacitated = status.incapacitated == true
 	local condition = TacticalUIRules.GetCondition(health, maxHealth, wounds, bleedRate, incapacitated)
-	healthText.Text = string.format("SALUD  %d / %d", math.floor(health), math.floor(maxHealth))
-	conditionText.Text = condition
-	conditionText.TextColor3 = if incapacitated or bleedRate > 0 then COLORS.Danger else COLORS.Accent
-
 	local weaponId = if type(status.equippedWeaponId) == "string" then status.equippedWeaponId else "Rifle"
 	local weapons = if type(status.weapons) == "table" then status.weapons else {}
 	local weapon = weapons[weaponId]
-	if type(weapon) == "table" then
-		ammoText.Text = `{status.weaponName or weaponId}  {TacticalUIRules.GetAmmoText(
-			if type(weapon.magazine) == "number" then weapon.magazine else 0,
-			if type(weapon.reserve) == "number" then weapon.reserve else 0,
-			weapon.isReloading == true
-		)}`
-	else
-		ammoText.Text = "MUNICION  sincronizando"
-	end
-
-	local canEquip = health > 0 and not incapacitated and (type(weapon) ~= "table" or not weapon.isReloading)
+	local canEquip = health > 0
+		and not incapacitated
+		and currentHumanoid ~= nil
+		and currentHumanoid.SeatPart == nil
+		and (type(weapon) ~= "table" or not weapon.isReloading)
 	rifleButton.Interactable = canEquip
 	sidearmButton.Interactable = canEquip
 	rifleButton.BackgroundColor3 = if weaponId == "Rifle" then COLORS.SurfaceActive else COLORS.Surface
@@ -617,7 +606,7 @@ local function renderMedicalStatus(status: any)
 	local items = if type(status.medicalItems) == "table" then status.medicalItems else {}
 	local summaryLines = {
 		`Condicion: {condition}`,
-		`Rol: {status.role or "Rifleman"}`,
+		`Rol: {status.role or "sincronizando"}`,
 		`Heridas: {wounds}  |  Sangrado: {string.format("%.1f", bleedRate)}/s`,
 		`Arma: {status.weaponName or weaponId}`,
 		`Cargador: {if type(weapon) == "table" then weapon.magazine or 0 else "--"}  |  Reserva: {if type(weapon)
@@ -626,12 +615,39 @@ local function renderMedicalStatus(status: any)
 			else "--"}`,
 		`Vendajes: {items.Bandage or 0}  |  Botiquines: {items.Medkit or 0}  |  Emergencia: {items.EmergencyKit or 0}`,
 	}
+	if latestInventory ~= nil and type(latestInventory.supplies) == "table" then
+		local ids = {}
+		for id in pairs(latestInventory.supplies) do
+			table.insert(ids, id)
+		end
+		table.sort(ids)
+		for _, id in ipairs(ids) do
+			table.insert(summaryLines, `{id}: {latestInventory.supplies[id]}`)
+		end
+	else
+		table.insert(summaryLines, "Suministros: sincronizando con el servidor")
+	end
+	if latestInventory ~= nil and type(latestInventory.equipment) == "table" then
+		table.insert(summaryLines, `Radio: {latestInventory.equipment.Radio or "sin equipo"}`)
+	end
 	medicalSummary.Text = table.concat(summaryLines, "\n")
 end
 
-combatRemote.OnClientEvent:Connect(function(message: any)
+scope:Connect(combatRemote.OnClientEvent, function(message: any)
 	if type(message) ~= "table" then
 		return
+	end
+	if message.action == "logistics_result" and message.ok and message.code == "entered_vehicle" then
+		local token = message.character or (type(message.status) == "table" and message.status.character)
+		if token == player.Character then
+			closeMenu()
+		end
+	end
+	if message.action == "logistics_status" and message.ok and message.character == player.Character then
+		latestInventory = message.inventory
+		if latestMedicalStatus ~= nil then
+			renderMedicalStatus(latestMedicalStatus)
+		end
 	end
 	local snapshot = if message.action == "medical_status" then message else message.status
 	if type(snapshot) == "table" then
@@ -643,6 +659,9 @@ refreshSquads = function()
 	local ok, response = pcall(function()
 		return squadRemote:InvokeServer({ action = "list" })
 	end)
+	if screen.Parent == nil then
+		return
+	end
 	if not ok then
 		setStatusMessage("No se pudo consultar la lista de escuadrones.")
 		return
@@ -668,25 +687,28 @@ refreshRadio = function()
 	end
 end
 
-for view, name in pairs(viewGuiNames) do
-	task.spawn(function()
-		local gui = playerGui:WaitForChild(name, 30)
-		if gui ~= nil and gui:IsA("ScreenGui") then
+local function registerPanel(gui: Instance)
+	for view, name in pairs(viewGuiNames) do
+		if gui.Name == name and gui:IsA("ScreenGui") and viewGuis[view] ~= gui then
 			viewGuis[view] = gui
 			gui.Enabled = false
 		end
-	end)
+	end
 end
+for _, gui in ipairs(playerGui:GetChildren()) do
+	registerPanel(gui)
+end
+scope:Connect(playerGui.ChildAdded, registerPanel)
 
 local function toggleMenuAction(_, inputState: Enum.UserInputState, inputObject: InputObject)
 	if inputState == Enum.UserInputState.Begin then
 		if UserInputService:GetFocusedTextBox() ~= nil then
 			return Enum.ContextActionResult.Pass
 		end
-		if inputObject.KeyCode == Enum.KeyCode.Escape and not hub.Visible then
+		if inputObject.KeyCode == Enum.KeyCode.Escape and playerGui:GetAttribute("SierraMenuOpen") ~= true then
 			return Enum.ContextActionResult.Pass
 		end
-		if hub.Visible then
+		if hub.Visible or inputObject.KeyCode == Enum.KeyCode.Escape then
 			closeMenu()
 		else
 			openMenu()
@@ -703,14 +725,13 @@ local function bindCharacter(character: Model)
 	end
 	table.clear(healthConnections)
 	currentHumanoid = nil
-	latestMedicalStatus = nil
-	healthText.Text = "SALUD  -- / --"
-	conditionText.Text = "Estado: sincronizando"
-	ammoText.Text = "MUNICION  sincronizando"
+	latestMedicalStatus, latestInventory = nil, nil
+	medicalSummary.Text = "Sincronizando equipo del servidor..."
+	closeMenu()
 	rifleButton.Interactable = false
 	sidearmButton.Interactable = false
 	local humanoid = character:WaitForChild("Humanoid", 10)
-	if player.Character ~= character then
+	if player.Character ~= character or screen.Parent == nil then
 		return
 	end
 	if humanoid ~= nil and humanoid:IsA("Humanoid") then
@@ -726,7 +747,7 @@ local function bindCharacter(character: Model)
 	requestMedicalStatus()
 end
 
-player.CharacterAdded:Connect(bindCharacter)
+scope:Connect(player.CharacterAdded, bindCharacter)
 if player.Character ~= nil then
 	task.spawn(bindCharacter, player.Character)
 end
@@ -734,6 +755,9 @@ end
 task.spawn(function()
 	while screen.Parent ~= nil do
 		task.wait(2)
+		if screen.Parent == nil then
+			break
+		end
 		requestMedicalStatus()
 		if hub.Visible and header.Text == "ESCUADRON" then
 			refreshSquads()
@@ -741,17 +765,48 @@ task.spawn(function()
 	end
 end)
 
-updateProfile()
-local camera = Workspace.CurrentCamera
-if camera ~= nil then
-	camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateProfile)
-end
-Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-	local currentCamera = Workspace.CurrentCamera
-	if currentCamera ~= nil then
-		currentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateProfile)
-		updateProfile()
+local function bindCamera()
+	cameraScope:Clean()
+	local camera = Workspace.CurrentCamera
+	if camera ~= nil then
+		cameraScope:Connect(camera:GetPropertyChangedSignal("ViewportSize"), updateProfile)
 	end
+	updateProfile()
+end
+scope:Connect(screen:GetPropertyChangedSignal("AbsoluteSize"), updateProfile)
+scope:Connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), bindCamera)
+bindCamera()
+local shared = ReplicatedStorage.Shared
+local controller = HUDController.new({
+	Player = player,
+	PlayerGui = playerGui,
+	Workspace = Workspace,
+	CombatRemote = combatRemote,
+	Heartbeat = game:GetService("RunService").Heartbeat,
+	GuiService = game:GetService("GuiService"),
+	UserInputService = UserInputService,
+	ContextActionService = ContextActionService,
+	StarterGui = game:GetService("StarterGui"),
+	TextChatService = game:GetService("TextChatService"),
+	MapConfig = require(shared.config:WaitForChild("MapConfig")),
+	LogisticsConfig = require(shared.config:WaitForChild("LogisticsConfig")),
+}, screen, openPanel)
+controller:Start()
+local function destroy()
+	controller:Stop()
+	scope:Clean()
+	cameraScope:Clean()
+	for _, connection in ipairs(healthConnections) do
+		connection:Disconnect()
+	end
+	table.clear(healthConnections)
+	ContextActionService:UnbindAction("SierraTacticalMenu")
+	playerGui:SetAttribute("SierraMenuOpen", false)
+end
+scope:Connect(screen.Destroying, destroy)
+scope:Connect(script.Destroying, function()
+	destroy()
+	screen:Destroy()
 end)
 refreshSquads()
 setPage("home")

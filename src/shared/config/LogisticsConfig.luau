@@ -9,6 +9,7 @@ local allowedDriverRoles = table.freeze({
 local vehicles = table.freeze({
 	Ranger = table.freeze({
 		DisplayName = "Ranger",
+		Category = "Pickup",
 		MaxSpeed = 42,
 		ReverseSpeed = 12,
 		TurnRate = 1.15,
@@ -68,6 +69,9 @@ return table.freeze({
 	RequestWindowSeconds = 1,
 	MaxRequestsPerWindow = 10,
 	VehicleStatusInterval = 1,
+	DriveSendInterval = 0.2,
+	DriveInputTimeout = 0.65,
+	MaxDriveRequestsPerWindow = 12,
 	Resupply = table.freeze({
 		AmmoRoundsPerUnit = 30,
 		MaxAmmoReserveMultiplier = 2,
